@@ -132,6 +132,71 @@ test_server_errors() {
     fi
 }
 
+test_reasoning_leak() {
+    echo -e "\n${YELLOW}[TEST]${NC} Reasoning leak check (complex math problem)"
+    local response
+    response=$(curl -s --max-time 180 -N -X POST "$API_URL" \
+        -H 'Content-Type: application/json' \
+        -d '{"model":"qwen3.6-27b","messages":[{"role":"user","content":"If a train leaves at 3pm traveling 60mph and another leaves at 4pm traveling 80mph, when do they meet if they are 300 miles apart? Solve step by step."}],"max_tokens":200,"stream":true,"temperature":0.7}' 2>&1) || true
+
+    # Check if model generated any thinking at all
+    local has_think_tags=false
+    if echo "$response" | grep -q '<think>\|</think>' 2>/dev/null; then
+        has_think_tags=true
+    fi
+
+    if $has_think_tags; then
+        # Model generated thinking — verify it's correctly parsed as reasoning_content
+        local has_reasoning=false
+        if echo "$response" | python3 -c "
+import sys, json
+for line in sys.stdin:
+    line = line.strip()
+    if line.startswith('data: ') and line != 'data: [DONE]':
+        d = json.loads(line[6:])
+        c = d.get('choices', [{}])[0]
+        delta = c.get('delta', {})
+        if delta.get('reasoning_content') or delta.get('reasoning_text'):
+            sys.exit(0)
+sys.exit(1)
+" 2>/dev/null; then
+            has_reasoning=true
+        fi
+
+        # Check <think> or </think> NOT leaked as content
+        local leaked=false
+        if echo "$response" | python3 -c "
+import sys, json
+for line in sys.stdin:
+    line = line.strip()
+    if line.startswith('data: ') and line != 'data: [DONE]':
+        d = json.loads(line[6:])
+        c = d.get('choices', [{}])[0]
+        delta = c.get('delta', {})
+        content = delta.get('content', '')
+        if '<think>' in content or '</think>' in content:
+            sys.exit(0)
+sys.exit(1)
+" 2>/dev/null; then
+            leaked=true
+        fi
+
+        if $has_reasoning; then
+            pass "Reasoning emitted as reasoning_content/reasoning_text"
+        else
+            fail "Model generated <think> but not emitted as reasoning"
+        fi
+
+        if $leaked; then
+            fail "<think> or </think> leaked as content"
+        else
+            pass "No <think> leak in content"
+        fi
+    else
+        pass "Model did not generate thinking (skipped leak check)"
+    fi
+}
+
 # ── Main ────────────────────────────────────────────────────
 echo "============================================"
 echo " QuenStar End-to-End Test Suite"
@@ -147,6 +212,7 @@ fi
 test_single_request
 test_streaming_request
 test_concurrent_requests
+test_reasoning_leak
 test_server_errors
 
 # 3. Summary

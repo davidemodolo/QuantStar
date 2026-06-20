@@ -9,6 +9,31 @@ import torch
 log = logging.getLogger(__name__)
 
 
+def _safe_messages(messages: list[dict]) -> list[dict]:
+    """Preprocess messages: Qwen3.6 template expects tool_call.arguments as dict,
+    but OpenAI API sends them as JSON strings. Convert to dict to avoid Jinja2
+    'Can only get item pairs from a mapping' errors."""
+    import json as _json
+    safe = []
+    for m in messages:
+        m = dict(m)
+        if m.get("role") == "assistant" and "tool_calls" in m:
+            tc_list = []
+            for tc in m["tool_calls"]:
+                tc = dict(tc)
+                fn = tc.get("function", {})
+                if isinstance(fn.get("arguments"), str):
+                    try:
+                        fn["arguments"] = _json.loads(fn["arguments"])
+                    except _json.JSONDecodeError:
+                        pass
+                tc["function"] = fn
+                tc_list.append(tc)
+            m["tool_calls"] = tc_list
+        safe.append(m)
+    return safe
+
+
 class InferenceEngine:
     def __init__(
         self,
@@ -24,7 +49,7 @@ class InferenceEngine:
     ):
         self.model = model
         self.tokenizer = tokenizer
-        self.cache = cache_config
+        self.cache_factory = cache_config
         self.max_context = max_context
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
@@ -42,16 +67,17 @@ class InferenceEngine:
             "pad_token_id": self.tokenizer.pad_token_id or self.tokenizer.eos_token_id,
             "eos_token_id": self.tokenizer.eos_token_id,
         }
-        if self.cache is not None:
-            kwargs["past_key_values"] = self.cache
+        if self.cache_factory is not None:
+            kwargs["past_key_values"] = self.cache_factory()
         return kwargs
 
-    def _tokenize(self, messages: list[dict[str, str]]) -> torch.Tensor:
-        text = self.tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
-        )
+    def _tokenize(self, messages: list[dict[str, str]], enable_thinking: bool = True,
+                   tools: Optional[list] = None) -> torch.Tensor:
+        kwargs = {"add_generation_prompt": True}
+        if tools:
+            kwargs["tools"] = tools
+        kwargs["enable_thinking"] = enable_thinking
+        text = self.tokenizer.apply_chat_template(_safe_messages(messages), tokenize=False, **kwargs)
         inputs = self.tokenizer(text, return_tensors="pt")
         return inputs["input_ids"].to(self.model.device)
 
@@ -59,8 +85,10 @@ class InferenceEngine:
         self,
         messages: list[dict[str, str]],
         max_tokens: Optional[int] = None,
-    ) -> str:
-        input_ids = self._tokenize(messages)
+        enable_thinking: bool = True,
+        tools: Optional[list] = None,
+    ) -> tuple[str, int, int]:
+        input_ids = self._tokenize(messages, enable_thinking=enable_thinking, tools=tools)
         kwargs = self._build_generate_kwargs()
         if max_tokens is not None:
             kwargs["max_new_tokens"] = max_tokens
@@ -74,18 +102,20 @@ class InferenceEngine:
         text = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
         n_tokens = len(generated_ids)
         log.info(f"Generated {n_tokens} tokens in {elapsed:.2f}s ({n_tokens / elapsed:.1f} tok/s)")
-        return text
+        return text, input_ids.shape[1], n_tokens
 
     def chat_completion_stream(
         self,
         messages: list[dict[str, str]],
         max_tokens: Optional[int] = None,
+        enable_thinking: bool = True,
+        tools: Optional[list] = None,
     ) -> Iterator[str]:
         from threading import Thread
 
         from transformers import TextIteratorStreamer
 
-        input_ids = self._tokenize(messages)
+        input_ids = self._tokenize(messages, enable_thinking=enable_thinking, tools=tools)
         kwargs = self._build_generate_kwargs()
         if max_tokens is not None:
             kwargs["max_new_tokens"] = max_tokens

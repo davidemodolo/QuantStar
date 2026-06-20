@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import gc
 import logging
-from typing import Optional
+from typing import Callable, Optional
 
 import torch
 
@@ -133,21 +133,34 @@ def _print_memory_usage(prefix: str = "") -> None:
     log.info(f"{prefix} GPU memory: {allocated:.2f} GB allocated, {reserved:.2f} GB reserved")
 
 
-def _create_quantized_kv_cache(model):
+_CacheFactory: Optional[Callable] = None
+
+
+def _make_cache_factory(model):
+    """Return a callable that creates a fresh QuantizedCache for each request."""
+    global _CacheFactory
+    if _CacheFactory is not None:
+        return _CacheFactory
+
     try:
         from transformers import QuantizedCache
         _patch_quantized_cache()
-        cache = QuantizedCache(
-            backend="quanto",
-            config=model.config,
-            nbits=4,
-            axis_key=0,
-            axis_value=0,
-            q_group_size=64,
-            residual_length=128,
-        )
-        log.info("Created quantized KV cache: 4-bit, backend=quanto (patched for DeltaNet)")
-        return cache
+        config = model.config
+
+        def factory():
+            return QuantizedCache(
+                backend="quanto",
+                config=config,
+                nbits=4,
+                axis_key=0,
+                axis_value=0,
+                q_group_size=64,
+                residual_length=128,
+            )
+
+        _CacheFactory = factory
+        log.info("Quantized KV cache factory ready: 4-bit, backend=quanto (patched for DeltaNet)")
+        return factory
     except ImportError as e:
         log.warning(f"Quantized KV cache not available ({e}) — using dynamic cache")
         return None
@@ -196,7 +209,7 @@ def load_and_quantize_model(
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    cache = _create_quantized_kv_cache(model)
+    cache_factory = _make_cache_factory(model)
 
     model.eval()
-    return model, tokenizer, cache
+    return model, tokenizer, cache_factory

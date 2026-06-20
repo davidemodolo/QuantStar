@@ -33,6 +33,40 @@ fi
 # Disable triton autotuner disk cache (avoids None cache key issue with FLA on py3.14)
 export FLA_CACHE_RESULTS=0
 
+# ── Patch transformers docstring warnings ───────────────────────
+patch_docstring() {
+    local f="$SCRIPT_DIR/.venv/lib/python3.14/site-packages/transformers/models/qwen3_5/modeling_qwen3_5.py"
+    if [ -f "$f" ] && grep -q "^class Qwen3_5CausalLMOutputWithPast" "$f"; then
+        if grep -q "loss (\`torch.FloatTensor\`" "$f" 2>/dev/null; then
+            return 0  # already patched
+        fi
+        info "Patching missing doc entries in Qwen3_5CausalLMOutputWithPast …"
+        python3 -c "
+f = '$f'
+with open(f) as fh:
+    content = fh.read()
+old = '''class Qwen3_5CausalLMOutputWithPast(CausalLMOutputWithPast):
+    r\\\"\\\"\\\"
+    rope_deltas'''
+new = '''class Qwen3_5CausalLMOutputWithPast(CausalLMOutputWithPast):
+    r\\\"\\\"\\\"
+    loss (\`torch.FloatTensor\` of shape \`(1,)\`, *optional*):
+        Language modeling loss (for training).
+    logits (\`torch.FloatTensor\` of shape \`(batch_size, sequence_length, config.vocab_size)\`):
+        Prediction scores of the language modeling head.
+    rope_deltas'''
+if old not in content:
+    print('SKIP: docstring format different from expected')
+else:
+    content = content.replace(old, new)
+    with open(f, 'w') as fh:
+        fh.write(content)
+    print('PATCHED')
+"
+    fi
+}
+patch_docstring
+
 # ── Virtual environment ────────────────────────────────────────
 if [ ! -d ".venv" ]; then
     info "Creating virtual environment …"
