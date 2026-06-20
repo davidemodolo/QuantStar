@@ -132,11 +132,6 @@ async def _stream_response(messages, max_tokens, enable_thinking=True, tools=Non
     created = int(time.time())
     model = CONFIG.model.repo
 
-    prompt_tokens = len(ENGINE.tokenizer.apply_chat_template(
-        _safe_messages(messages), add_generation_prompt=True, tokenize=True,
-        enable_thinking=enable_thinking, tools=tools or None,
-    ))
-
     yield {
         "event": None,
         "data": json.dumps({
@@ -157,6 +152,7 @@ async def _stream_response(messages, max_tokens, enable_thinking=True, tools=Non
             return None
 
     gen = ENGINE.chat_completion_stream(messages, max_tokens, enable_thinking=enable_thinking, tools=tools)
+    prompt_tokens = ENGINE._last_prompt_tokens
 
     buffer = ""
     # Qwen3.6 template always emits <think>\n before generation when thinking is

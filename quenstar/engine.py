@@ -56,6 +56,7 @@ class InferenceEngine:
         self.top_p = top_p
         self.top_k = top_k
         self.presence_penalty = presence_penalty
+        self._last_prompt_tokens = 0
 
     def _build_generate_kwargs(self) -> dict:
         kwargs = {
@@ -116,6 +117,7 @@ class InferenceEngine:
         from transformers import TextIteratorStreamer
 
         input_ids = self._tokenize(messages, enable_thinking=enable_thinking, tools=tools)
+        self._last_prompt_tokens = input_ids.shape[1]
         kwargs = self._build_generate_kwargs()
         if max_tokens is not None:
             kwargs["max_new_tokens"] = max_tokens
