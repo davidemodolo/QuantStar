@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import yaml
 
@@ -12,21 +11,19 @@ class ModelConfig:
     repo: str = "Qwen/Qwen3.6-27B"
     cache_dir: str = "./models"
     torch_dtype: str = "bfloat16"
-    attn_implementation: str = "flash_attention_2"
+    attn_implementation: str = "sdpa"
 
 
 @dataclass
 class QuantizationConfig:
-    weight_bits: int = 3
+    weight_bits: int = 4
     kv_cache_bits: int = 4
-    turbo: bool = True
-    hybrid: bool = False
 
 
 @dataclass
 class InferenceConfig:
     max_context: int = 262144
-    max_new_tokens: int = 32768
+    max_new_tokens: int = 65536
     temperature: float = 0.7
     top_p: float = 0.8
     top_k: int = 20

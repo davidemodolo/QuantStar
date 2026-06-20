@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import logging
-import sys
-from typing import Optional
 
 from .config import QuenStarConfig
 from .engine import InferenceEngine
@@ -12,7 +10,6 @@ log = logging.getLogger(__name__)
 
 def run_cli(engine: InferenceEngine, config: QuenStarConfig):
     from rich.console import Console
-    from rich.markdown import Markdown
 
     console = Console()
     messages: list[dict[str, str]] = []

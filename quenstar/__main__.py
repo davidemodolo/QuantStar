@@ -5,13 +5,74 @@ Usage:
     python -m quenstar serve              # Start OpenAI-compatible server
     python -m quenstar chat               # Interactive chat
     python -m quenstar info               # Show config and VRAM info
+    python -m quenstar init               # Register QuenStar in OpenCode config
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import logging
-import sys
+import os
+
+
+def _opencode_config_path() -> str:
+    return os.path.expanduser("~/.config/opencode/opencode.json")
+
+
+def _init_opencode(config) -> None:
+    config_path = _opencode_config_path()
+    os.makedirs(os.path.dirname(config_path), exist_ok=True)
+
+    if os.path.exists(config_path):
+        with open(config_path) as f:
+            cfg = json.load(f)
+        print(f"Updating existing OpenCode config: {config_path}")
+    else:
+        cfg = {}
+        print(f"Creating OpenCode config: {config_path}")
+
+    cfg.setdefault("$schema", "https://opencode.ai/config.json")
+    cfg.setdefault("provider", {})
+
+    cfg["provider"]["quenstar"] = {
+        "name": "QuenStar v2 (local)",
+        "npm": "@ai-sdk/openai-compatible",
+        "options": {
+            "baseURL": f"http://{config.server.host}:{config.server.port}/v1",
+            "apiKey": "local",
+        },
+        "models": {
+            "qwen3.6-27b": {
+                "name": "Qwen3.6 27B 4-bit (local)",
+                "reasoning": True,
+                "tools": True,
+                "limit": {
+                    "context": config.inference.max_context,
+                    "output": config.inference.max_new_tokens,
+                },
+            }
+        },
+    }
+
+    cfg.setdefault("agent", {})
+    cfg["agent"]["quenstar"] = {
+        "description": "Local QuenStar v2 — Qwen3.6 27B 4-bit",
+        "model": "quenstar/qwen3.6-27b",
+        "temperature": 0,
+    }
+
+    with open(config_path, "w") as f:
+        json.dump(cfg, f, indent=2)
+        f.write("\n")
+
+    print(f"  Provider: quenstar")
+    print(f"  Base URL: http://{config.server.host}:{config.server.port}/v1")
+    print(f"  Context:  {config.inference.max_context:,} tokens")
+    print(f"  Output:   {config.inference.max_new_tokens:,} tokens")
+    print(f"  Agent:    quenstar → quenstar/qwen3.6-27b")
+    print()
+    print("Run '/models' in OpenCode and select 'quenstar/qwen3.6-27b' to use it.")
 
 
 def main():
@@ -22,6 +83,7 @@ def main():
     sub.add_parser("serve", help="Start the OpenAI-compatible server")
     sub.add_parser("chat", help="Start interactive chat")
     sub.add_parser("info", help="Show configuration")
+    sub.add_parser("init", help="Register QuenStar in OpenCode config")
 
     parser.add_argument("--config", default="config.yaml", help="Path to config file")
     parser.add_argument("--log-level", default=None, help="Logging level")
@@ -52,7 +114,11 @@ def main():
         print(f"Weight bits: {config.quantization.weight_bits}")
         print(f"KV cache bits: {config.quantization.kv_cache_bits}")
         print(f"Max context: {config.inference.max_context}")
+        print(f"Max output:  {config.inference.max_new_tokens}")
         print(f"Server: {config.server.host}:{config.server.port}")
+
+    elif args.command == "init":
+        _init_opencode(config)
 
     elif args.command in ("serve", "chat"):
         from .download import download_model
@@ -61,9 +127,6 @@ def main():
         from .quantize import load_and_quantize_model
         model, tokenizer, cache_config = load_and_quantize_model(
             model_path=model_path,
-            weight_bits=config.quantization.weight_bits,
-            kv_cache_bits=config.quantization.kv_cache_bits,
-            turbo=config.quantization.turbo,
             attn_implementation=config.model.attn_implementation,
             torch_dtype_str=config.model.torch_dtype,
         )

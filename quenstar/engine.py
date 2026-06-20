@@ -41,7 +41,7 @@ class InferenceEngine:
         tokenizer: Any,
         cache_config: Any = None,
         max_context: int = 262144,
-        max_new_tokens: int = 32768,
+        max_new_tokens: int = 65536,
         temperature: float = 0.7,
         top_p: float = 0.8,
         top_k: int = 20,

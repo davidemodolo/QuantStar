@@ -171,9 +171,6 @@ def _make_cache_factory(model):
 
 def load_and_quantize_model(
     model_path: str,
-    weight_bits: int = 4,
-    kv_cache_bits: int = 4,
-    turbo: bool = False,
     attn_implementation: str = "sdpa",
     torch_dtype_str: str = "bfloat16",
 ) -> tuple[torch.nn.Module, object, Optional[object]]:

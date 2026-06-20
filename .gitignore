@@ -40,5 +40,4 @@ Thumbs.db
 # Install marker
 .deps_installed
 
-# Config with secrets
-config.local.yaml
+

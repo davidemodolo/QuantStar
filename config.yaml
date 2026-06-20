@@ -4,18 +4,15 @@ model:
   cache_dir: "./models"
   torch_dtype: "bfloat16"
   attn_implementation: "sdpa"
-  # load_in_4bit/8bit are handled via torchao post-load quantization
+  # 4-bit weights via bitsandbytes NF4 quantization
 
 quantization:
   weight_bits: 4          # 4 = bitsandbytes NF4; 2/3 need offline quantized model
   kv_cache_bits: 4        # KV cache quantization bits
-  turbo: true             # use torchao's optimized kernels
-  # hybrid expert quantization (for MoE models, ignored for dense)
-  hybrid: false
 
 inference:
   max_context: 262144     # full 262k — fits with 4-bit KV cache (~4.3 GB) + 4-bit weights (~16.5 GB) = ~21 GB
-  max_new_tokens: 32768
+  max_new_tokens: 65536
   temperature: 0.7
   top_p: 0.8
   top_k: 20

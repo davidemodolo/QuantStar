@@ -4,7 +4,6 @@ import json
 import logging
 import time
 import uuid
-from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
@@ -18,11 +17,6 @@ log = logging.getLogger(__name__)
 
 ENGINE: Optional[InferenceEngine] = None
 CONFIG: Optional[QuenStarConfig] = None
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    yield
 
 
 def _is_small_task(messages: list[dict], max_tokens: Optional[int]) -> bool:
@@ -57,7 +51,7 @@ def create_app(engine: InferenceEngine, config: QuenStarConfig) -> FastAPI:
     ENGINE = engine
     CONFIG = config
 
-    app = FastAPI(title="QuenStar", version="2.0.0", lifespan=lifespan)
+    app = FastAPI(title="QuenStar", version="2.0.0")
 
     app.add_middleware(
         CORSMiddleware,
@@ -85,6 +79,8 @@ def create_app(engine: InferenceEngine, config: QuenStarConfig) -> FastAPI:
                     "object": "model",
                     "created": int(time.time()),
                     "owned_by": "quenstar",
+                    "context_window": ENGINE.max_context,
+                    "max_output_tokens": ENGINE.max_new_tokens,
                 }
             ],
         }
@@ -98,6 +94,8 @@ def create_app(engine: InferenceEngine, config: QuenStarConfig) -> FastAPI:
             "object": "model",
             "created": int(time.time()),
             "owned_by": "quenstar",
+            "context_window": ENGINE.max_context,
+            "max_output_tokens": ENGINE.max_new_tokens,
         }
 
     @app.post("/v1/chat/completions")
@@ -109,7 +107,6 @@ def create_app(engine: InferenceEngine, config: QuenStarConfig) -> FastAPI:
         temperature = body.get("temperature")
         top_p = body.get("top_p")
         tools = body.get("tools")
-        tool_choice = body.get("tool_choice")
 
         if temperature is not None:
             ENGINE.temperature = temperature
@@ -130,14 +127,14 @@ def create_app(engine: InferenceEngine, config: QuenStarConfig) -> FastAPI:
 
 async def _stream_response(messages, max_tokens, enable_thinking=True, tools=None):
     import asyncio
-    import re
 
     request_id = f"chatcmpl-{uuid.uuid4().hex[:16]}"
     created = int(time.time())
     model = CONFIG.model.repo
 
     prompt_tokens = len(ENGINE.tokenizer.apply_chat_template(
-        _safe_messages(messages), add_generation_prompt=True, tokenize=True
+        _safe_messages(messages), add_generation_prompt=True, tokenize=True,
+        enable_thinking=enable_thinking, tools=tools or None,
     ))
 
     yield {
@@ -180,29 +177,14 @@ async def _stream_response(messages, max_tokens, enable_thinking=True, tools=Non
     # Create per-request incremental tool call parser
     tool_parser = _make_tool_call_stream_parser(tool_index=0)
 
-    log.info("_stream_response start enable_thinking=%s state=%s tools=%s",
-             enable_thinking, state, bool(tools))
+    log.info("_stream_response start enable_thinking=%s state=%s tools=%s max_tokens=%s prompt_tokens=%d",
+             enable_thinking, state, bool(tools), max_tokens, prompt_tokens)
 
     while True:
         text = await loop.run_in_executor(None, _next_token, gen)
         if text is None:
             break
         buffer += text
-
-        if state == "pre":
-            idx = buffer.find(THINK_TAG, content_emitted)
-            if idx == -1:
-                safe_end = max(content_emitted, len(buffer) - HOLD)
-                if safe_end > content_emitted:
-                    yield _delta_chunk(request_id, created, model, content=buffer[content_emitted:safe_end])
-                    content_emitted = safe_end
-            else:
-                if idx > content_emitted:
-                    yield _delta_chunk(request_id, created, model, content=buffer[content_emitted:idx])
-                content_emitted = idx + len(THINK_TAG)
-                think_emitted = content_emitted
-                state = "think"
-                log.info("_stream_response found <think> → state=think")
 
         if state == "think":
             end_idx = buffer.find(THINK_CLOSE, think_emitted)
@@ -258,7 +240,7 @@ async def _stream_response(messages, max_tokens, enable_thinking=True, tools=Non
                 log.info("_stream_response found </tool_call> → state=post")
                 continue
 
-        # After all state-specific processing, if we're in post or pre and
+        # After all state-specific processing, if we're in post and
         # have hit end of stream, flush any remaining holdback
         if state == "post" and content_emitted < len(buffer):
             remaining = buffer[content_emitted:]
@@ -267,7 +249,7 @@ async def _stream_response(messages, max_tokens, enable_thinking=True, tools=Non
                 content_emitted = len(buffer)
 
     # Flush final holdback
-    if state in ("pre", "post") and content_emitted < len(buffer):
+    if state == "post" and content_emitted < len(buffer):
         remaining = buffer[content_emitted:]
         if remaining:
             yield _delta_chunk(request_id, created, model, content=remaining)
@@ -277,6 +259,9 @@ async def _stream_response(messages, max_tokens, enable_thinking=True, tools=Non
             yield _delta_chunk(request_id, created, model, reasoning_content=remaining)
 
     completion_tokens = len(ENGINE.tokenizer.encode(buffer, add_special_tokens=False))
+
+    log.info("_stream_response done prompt_tokens=%d completion_tokens=%d total_tokens=%d buffer_chars=%d",
+             prompt_tokens, completion_tokens, prompt_tokens + completion_tokens, len(buffer))
 
     finish_reason = "tool_calls" if has_tool_calls else "stop"
 
@@ -374,7 +359,6 @@ def _delta_chunk(request_id, created, model, content=None, reasoning_content=Non
     if content is not None:
         delta["content"] = content
     if reasoning_content is not None:
-        delta["reasoning"] = reasoning_content
         delta["reasoning_content"] = reasoning_content
         delta["reasoning_text"] = reasoning_content
     if tool_calls is not None:
@@ -395,6 +379,8 @@ def _sync_response(messages, max_tokens, enable_thinking=True, tools=None):
     raw_text, prompt_tokens, completion_tokens = ENGINE.chat_completion_sync(
         messages, max_tokens, enable_thinking=enable_thinking, tools=tools
     )
+    log.info("_sync_response done prompt_tokens=%d completion_tokens=%d total_tokens=%d text_chars=%d",
+             prompt_tokens, completion_tokens, prompt_tokens + completion_tokens, len(raw_text))
 
     content = raw_text
     reasoning_content = None
@@ -439,7 +425,6 @@ def _sync_response(messages, max_tokens, enable_thinking=True, tools=None):
 
     message = {"role": "assistant", "content": content}
     if reasoning_content:
-        message["reasoning"] = reasoning_content
         message["reasoning_content"] = reasoning_content
         message["reasoning_text"] = reasoning_content
     if tool_calls:

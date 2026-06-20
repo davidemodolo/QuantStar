@@ -1,0 +1,4 @@
+This is the first sentence of my reasoning process.
+Second sentence: I'm breaking down the task into clear steps.
+Third: I need to write these lines to a file first.
+Fourth: Then I'll edit the file to remove the last line.

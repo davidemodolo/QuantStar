@@ -80,7 +80,7 @@ if [ ! -f ".deps_installed" ]; then
     pip install torch --index-url https://download.pytorch.org/whl/cu126 -q
 
     info "Installing core dependencies …"
-    pip install pyyaml tqdm rich huggingface_hub fastapi "uvicorn[standard]" sse-starlette pillow accelerate -q
+    pip install pyyaml tqdm rich huggingface_hub fastapi "uvicorn[standard]" sse-starlette accelerate -q
 
     info "Installing transformers …"
     pip install transformers -q
@@ -114,13 +114,18 @@ case "$MODE" in
     info)
         python -m quenstar info
         ;;
+    init)
+        info "Registering QuenStar in OpenCode config …"
+        python -m quenstar init
+        ;;
     *)
-        echo "Usage: ./run.sh [download|serve|chat|info]"
+        echo "Usage: ./run.sh [download|serve|chat|info|init]"
         echo ""
         echo "  download  — download Qwen3.6-27B from HuggingFace"
         echo "  serve     — start OpenAI-compatible API server"
         echo "  chat      — start interactive CLI chat"
         echo "  info      — show configuration"
+        echo "  init      — register QuenStar in OpenCode config"
         exit 1
         ;;
 esac
