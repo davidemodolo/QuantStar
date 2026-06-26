@@ -119,10 +119,12 @@ Measured on RTX 3090 24GB, Python 3.14, torch 2.12.1+cu126:
 
 | Context | Peak VRAM | Prefill | Decode |
 |---------|-----------|---------|--------|
-| 3k | 17.1 GB | 4s | - |
-| 16k | 17.3 GB | - | 2.3 tok/s |
-| 131k | 19.7 GB | 488s | - |
-| 256k | 21.1 GB | 1685s | 0.7 tok/s |
+| 3k | 17.1 GB | 3.0s | 11.0 tok/s |
+| 16k | 17.3 GB | 20.8s | 6.7 tok/s |
+| 32k | 17.6 GB | 52.9s | 4.4 tok/s |
+| 64k | 18.1 GB | 151.1s | 2.6 tok/s |
+| 128k | 19.1 GB | 480.3s | 1.4 tok/s |
+| 256k | 21.2 GB | 1649.6s | 0.8 tok/s |
 
 Weights: ~16.5 GB (NF4). KV cache: ~4.3 GB at 256k (int4, append-only). Headroom: ~2 GB.
 
