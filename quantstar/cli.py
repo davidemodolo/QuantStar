@@ -15,9 +15,6 @@ def run_cli(engine: InferenceEngine, config: QuantStarConfig):
     messages: list[dict[str, str]] = []
 
     console.print("[bold cyan]QuantStar[/] — [dim]Qwen3.6-27B quantized[/]")
-    console.print(f"  weight bits: {config.quantization.weight_bits}")
-    console.print(f"  KV cache bits: {config.quantization.kv_cache_bits}")
-    console.print(f"  max context: {config.inference.max_context}")
     vram = engine.get_vram_info()
     if vram["cuda_available"]:
         console.print(f"  VRAM: {vram['allocated_gb']:.1f}/{vram['total_gb']:.0f} GB allocated")

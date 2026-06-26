@@ -42,22 +42,18 @@ class InferenceEngine:
         model: torch.nn.Module,
         tokenizer: Any,
         cache_config: Any = None,
-        max_context: int = 262144,
         max_new_tokens: int = 65536,
         temperature: float = 0.7,
         top_p: float = 0.8,
         top_k: int = 20,
-        presence_penalty: float = 1.5,
     ):
         self.model = model
         self.tokenizer = tokenizer
         self.cache_factory = cache_config
-        self.max_context = max_context
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
         self.top_p = top_p
         self.top_k = top_k
-        self.presence_penalty = presence_penalty
         self._last_prompt_tokens = 0
         self._session_kv = None
         self._session_prompt_ids = None

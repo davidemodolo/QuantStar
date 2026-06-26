@@ -15,19 +15,11 @@ class ModelConfig:
 
 
 @dataclass
-class QuantizationConfig:
-    weight_bits: int = 4
-    kv_cache_bits: int = 4
-
-
-@dataclass
 class InferenceConfig:
-    max_context: int = 262144
     max_new_tokens: int = 65536
     temperature: float = 0.7
     top_p: float = 0.8
     top_k: int = 20
-    presence_penalty: float = 1.5
 
 
 @dataclass
@@ -44,7 +36,6 @@ class LoggingConfig:
 @dataclass
 class QuantStarConfig:
     model: ModelConfig = field(default_factory=ModelConfig)
-    quantization: QuantizationConfig = field(default_factory=QuantizationConfig)
     inference: InferenceConfig = field(default_factory=InferenceConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
@@ -61,10 +52,6 @@ def load_config(path: str = "config.yaml") -> QuantStarConfig:
             for k, v in raw["model"].items():
                 if hasattr(cfg.model, k):
                     setattr(cfg.model, k, v)
-        if "quantization" in raw:
-            for k, v in raw["quantization"].items():
-                if hasattr(cfg.quantization, k):
-                    setattr(cfg.quantization, k, v)
         if "inference" in raw:
             for k, v in raw["inference"].items():
                 if hasattr(cfg.inference, k):
@@ -83,12 +70,6 @@ def load_config(path: str = "config.yaml") -> QuantStarConfig:
             cfg.model.repo = value
         elif key == "QUANTSTAR_MODEL_CACHE":
             cfg.model.cache_dir = value
-        elif key == "QUANTSTAR_WEIGHT_BITS":
-            cfg.quantization.weight_bits = int(value)
-        elif key == "QUANTSTAR_KV_BITS":
-            cfg.quantization.kv_cache_bits = int(value)
-        elif key == "QUANTSTAR_MAX_CONTEXT":
-            cfg.inference.max_context = int(value)
         elif key == "QUANTSTAR_HOST":
             cfg.server.host = value
         elif key == "QUANTSTAR_PORT":

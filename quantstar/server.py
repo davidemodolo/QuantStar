@@ -79,7 +79,6 @@ def create_app(engine: InferenceEngine, config: QuantStarConfig) -> FastAPI:
                     "object": "model",
                     "created": int(time.time()),
                     "owned_by": "quantstar",
-                    "context_window": ENGINE.max_context,
                     "max_output_tokens": ENGINE.max_new_tokens,
                 }
             ],
@@ -94,7 +93,6 @@ def create_app(engine: InferenceEngine, config: QuantStarConfig) -> FastAPI:
             "object": "model",
             "created": int(time.time()),
             "owned_by": "quantstar",
-            "context_window": ENGINE.max_context,
             "max_output_tokens": ENGINE.max_new_tokens,
         }
 

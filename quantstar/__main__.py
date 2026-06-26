@@ -68,7 +68,6 @@ def _init_opencode(config) -> None:
                 "reasoning": True,
                 "tools": True,
                 "limit": {
-                    "context": config.inference.max_context,
                     "output": config.inference.max_new_tokens,
                 },
             }
@@ -88,7 +87,6 @@ def _init_opencode(config) -> None:
 
     print(f"  Provider: quantstar")
     print(f"  Base URL: http://{config.server.host}:{config.server.port}/v1")
-    print(f"  Context:  {config.inference.max_context:,} tokens")
     print(f"  Output:   {config.inference.max_new_tokens:,} tokens")
     print(f"  Agent:    quantstar → quantstar/qwen3.6-27b")
     print()
@@ -131,9 +129,6 @@ def main():
         print(f"Cache dir: {config.model.cache_dir}")
         print(f"Attn: {config.model.attn_implementation}")
         print(f"Torch dtype: {config.model.torch_dtype}")
-        print(f"Weight bits: {config.quantization.weight_bits}")
-        print(f"KV cache bits: {config.quantization.kv_cache_bits}")
-        print(f"Max context: {config.inference.max_context}")
         print(f"Max output:  {config.inference.max_new_tokens}")
         print(f"Server: {config.server.host}:{config.server.port}")
 
@@ -156,12 +151,10 @@ def main():
             model=model,
             tokenizer=tokenizer,
             cache_config=cache_config,
-            max_context=config.inference.max_context,
             max_new_tokens=config.inference.max_new_tokens,
             temperature=config.inference.temperature,
             top_p=config.inference.top_p,
             top_k=config.inference.top_k,
-            presence_penalty=config.inference.presence_penalty,
         )
 
         if args.command == "serve":

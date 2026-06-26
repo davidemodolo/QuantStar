@@ -3,8 +3,7 @@ from __future__ import annotations
 import gc
 import logging
 import os
-import sys
-from typing import Callable, Optional
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -103,7 +102,6 @@ class Int4AttentionCacheLayer(CacheLayerMixin):
 
     Stores K/V as packed int4 (uint8) with per-group-of-64-token absmax scaling.
     New tokens are quantized and appended; existing data is never touched.
-    On update(), dequantizes all stored K/V to bf16 for SDPA (transient, freed after layer).
     """
 
     def __init__(self, group_size: int = _GROUP_SIZE):
@@ -135,17 +133,18 @@ class Int4AttentionCacheLayer(CacheLayerMixin):
     def get_max_cache_shape(self) -> int:
         return -1
 
+    def get_mask_sizes(self, query_length: int) -> tuple[int, int]:
+        return self.get_seq_length() + query_length, 0
+
     def update(self, key_states: torch.Tensor, value_states: torch.Tensor, *args, **kwargs):
         if not self.is_initialized:
             self._lazy_init(key_states, value_states)
-
         if self._pending_keys is None:
             self._pending_keys = key_states
             self._pending_values = value_states
         else:
             self._pending_keys = torch.cat([self._pending_keys, key_states], dim=-2)
             self._pending_values = torch.cat([self._pending_values, value_states], dim=-2)
-
         pending_len = self._pending_keys.shape[-2]
         n_groups = pending_len // self.group_size
         if n_groups > 0:
@@ -155,8 +154,7 @@ class Int4AttentionCacheLayer(CacheLayerMixin):
             self._quantize_and_append(fk, fv)
             self._pending_keys = self._pending_keys[:, :, flush_len:, :]
             self._pending_values = self._pending_values[:, :, flush_len:, :]
-
-        return self._build_full_kv()
+        return key_states, value_states
 
     def _quantize_and_append(self, keys: torch.Tensor, values: torch.Tensor):
         pk, sk, _ = _quantize_int4(keys, self.group_size)
@@ -175,27 +173,6 @@ class Int4AttentionCacheLayer(CacheLayerMixin):
 
         self._num_quantized += keys.shape[-2]
 
-    def _build_full_kv(self) -> tuple[torch.Tensor, torch.Tensor]:
-        parts_k = []
-        if self._packed_keys is not None:
-            parts_k.append(_dequantize_int4(self._packed_keys, self._keys_scales, self._num_quantized, self.group_size))
-        if self._pending_keys is not None and self._pending_keys.shape[-2] > 0:
-            parts_k.append(self._pending_keys)
-
-        parts_v = []
-        if self._packed_values is not None:
-            parts_v.append(_dequantize_int4(self._packed_values, self._values_scales, self._num_quantized, self.group_size))
-        if self._pending_values is not None and self._pending_values.shape[-2] > 0:
-            parts_v.append(self._pending_values)
-
-        if parts_k:
-            return torch.cat(parts_k, dim=-2), torch.cat(parts_v, dim=-2)
-
-        empty = (1, self._n_kv_heads, 0, self._head_dim)
-        k = torch.zeros(*empty, dtype=self.dtype, device=self.device)
-        v = torch.zeros(*empty, dtype=self.dtype, device=self.device)
-        return k, v
-
     def get_seq_length(self) -> int:
         if not self.is_initialized:
             return 0
@@ -203,9 +180,6 @@ class Int4AttentionCacheLayer(CacheLayerMixin):
         if self._pending_keys is not None:
             total += self._pending_keys.shape[-2]
         return total
-
-    def get_mask_sizes(self, query_length: int) -> tuple[int, int]:
-        return self.get_seq_length() + query_length, 0
 
     # --- block-by-block dequant API (avoids materializing the full KV) ---
 
@@ -292,104 +266,7 @@ class QuantStarKVCache(Cache):
         super().__init__(layers=layers)
 
 
-# ---------------------------------------------------------------------------
-# Blockwise online-softmax GQA attention
-# ---------------------------------------------------------------------------
-#
-# During chunked prefill the query is a suffix of the cached keys (offset>0).
-# SDPA cannot keep GQA in that case: a causal mask is required for the offset,
-# and enable_gqa + any mask falls back to the math kernel (materializes the
-# full [B,nq,q,kv] score matrix -> OOM). is_causal=True is wrong for offset.
-# FlashAttention-2 has no cp314 wheel and FlexAttention overflows triton
-# registers for 24 query heads (non power-of-2). So we reimplement the
-# FlashAttention online-softmax in PyTorch: K/V stay at nkv heads (no repeat),
-# causality is applied per key-block, peak memory is one [B,nq,q,block] block.
-
 _BLOCK_SIZE = 1024
-
-
-def blockwise_gqa_attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor,
-                            scaling: float, block_size: int = _BLOCK_SIZE) -> torch.Tensor:
-    """Online-softmax blockwise attention with GQA (no repeat_kv).
-
-    q: [B, nq, q_len, hd], k/v: [B, nkv, kv_len, hd]. Causal-with-offset:
-    query i (absolute pos offset+i) attends to keys 0..(offset+i).
-    Returns [B, nq, q_len, hd].
-    """
-    B, nq, q_len, hd = query.shape
-    nkv = key.shape[1]
-    kv_len = key.shape[2]
-    G = nq // nkv
-    offset = kv_len - q_len
-    device, dtype = query.device, query.dtype
-
-    # running online-softmax state (fp32 for stability)
-    m = torch.full((B, nq, q_len, 1), float("-inf"), device=device, dtype=torch.float32)
-    l = torch.zeros((B, nq, q_len, 1), device=device, dtype=torch.float32)
-    num = torch.zeros((B, nq, q_len, hd), device=device, dtype=torch.float32)
-
-    qg = query.view(B, nkv, G, q_len, hd)  # for GQA batched matmul
-
-    for start in range(0, kv_len, block_size):
-        end = min(start + block_size, kv_len)
-        kb = key[:, :, start:end, :]
-        vb = value[:, :, start:end, :]
-        Bl = end - start
-
-        # GQA scores: [B, nkv, G, q_len, Bl] -> [B, nq, q_len, Bl]
-        scores = torch.matmul(qg, kb.unsqueeze(2).transpose(-1, -2)) * scaling
-        scores = scores.view(B, nq, q_len, Bl).float()
-
-        # causal-with-offset mask
-        key_pos = torch.arange(start, end, device=device).view(1, 1, 1, Bl)
-        q_pos = torch.arange(q_len, device=device).view(1, 1, q_len, 1)
-        causal = (q_pos + offset) >= key_pos
-        scores = scores.masked_fill(~causal, float("-inf"))
-
-        mb = scores.amax(dim=-1, keepdim=True)
-        m_new = torch.maximum(m, mb)
-        p = torch.exp(scores - m_new)
-
-        pg = p.view(B, nkv, G, q_len, Bl)
-        block_num = torch.matmul(pg, vb.unsqueeze(2).float()).view(B, nq, q_len, hd)
-        block_sum = p.sum(dim=-1, keepdim=True)
-
-        alpha = torch.exp(m - m_new)
-        num = num * alpha + block_num
-        l = l * alpha + block_sum
-        m = m_new
-
-    out = num / l.clamp(min=1e-20)
-    return out.to(dtype)
-
-
-def quantstar_attention_forward(module, query, key, value, attention_mask, dropout=0.0,
-                               scaling=None, is_causal=None, **kwargs):
-    """Custom attention: blockwise GQA for cached prefill (offset>0), SDPA otherwise.
-
-    The 4D causal mask is never materialized for this implementation (see note
-    above), so attention_mask is None and GQA stays active on the SDPA path.
-    """
-    q_len = query.shape[2]
-    kv_len = key.shape[2]
-    has_gqa = getattr(module, "num_key_value_groups", 1) > 1
-    scale = scaling if scaling is not None else (query.shape[-1] ** -0.5)
-
-    # cached prefill: query is a suffix of the keys -> blockwise to keep GQA
-    if has_gqa and q_len > 1 and kv_len > q_len:
-        out = blockwise_gqa_attention(query, key, value, scale)
-        return out.transpose(1, 2).contiguous(), None
-
-    # decode (q_len==1) or first chunk (kv_len==q_len): normal SDPA, GQA active
-    sdpa_kwargs = {"enable_gqa": True} if has_gqa else {}
-    if is_causal is None:
-        is_causal = getattr(module, "is_causal", True)
-    is_causal = q_len > 1 and attention_mask is None and is_causal
-    attn_output = F.scaled_dot_product_attention(
-        query, key, value, attn_mask=attention_mask, dropout_p=dropout,
-        scale=scaling, is_causal=is_causal, **sdpa_kwargs,
-    )
-    return attn_output.transpose(1, 2).contiguous(), None
 
 
 def blockwise_attention_from_cache(query: torch.Tensor, cache_layer, scaling: float,
@@ -508,13 +385,7 @@ def _patch_qwen_attention():
 _patch_qwen_attention()
 
 
-def _register_quantstar_attention():
-    from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
-    if "quantstar" not in ALL_ATTENTION_FUNCTIONS:
-        ALL_ATTENTION_FUNCTIONS.register("quantstar", quantstar_attention_forward)
 
-
-_register_quantstar_attention()
 
 
 # ---------------------------------------------------------------------------
@@ -529,22 +400,14 @@ def _print_memory_usage(prefix: str = "") -> None:
     log.info(f"{prefix} GPU memory: {allocated:.2f} GB allocated, {reserved:.2f} GB reserved")
 
 
-_CacheFactory: Optional[Callable] = None
-
-
 def _make_cache_factory(model):
     """Return a callable that creates a fresh QuantStarKVCache for each request."""
-    global _CacheFactory
-    if _CacheFactory is not None:
-        return _CacheFactory
-
     try:
         config = model.config
 
         def factory():
             return QuantStarKVCache(config=config)
 
-        _CacheFactory = factory
         log.info("QuantStar int4 KV cache factory ready (append-only, no re-quantization)")
         return factory
     except Exception as e:
@@ -570,10 +433,9 @@ def load_and_quantize_model(
         bnb_4bit_quant_type="nf4",
     )
 
-    # Load with sdpa (validated), then switch to our custom "quantstar" attention.
-    # "quantstar" is registered in ALL_ATTENTION_FUNCTIONS but NOT in the mask
-    # registry, so create_causal_mask auto-skips (returns None) -> no 4D mask
-    # materialized, and our attention handles causality + GQA itself.
+    # Load with sdpa (validated), then switch to "quantstar" which is NOT in
+    # the mask registry, so create_causal_mask auto-skips (returns None) -> no
+    # 4D mask materialized, and our attention handles causality + GQA itself.
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
         quantization_config=bnb_config,

@@ -67,6 +67,30 @@ else:
 }
 patch_docstring
 
+# ── Patch bitsandbytes _check_is_size deprecation ───────────────
+patch_bitsandbytes() {
+    local bnb_dir="$SCRIPT_DIR/.venv/lib/python3.14/site-packages/bitsandbytes"
+    if [ ! -d "$bnb_dir" ]; then
+        return 0
+    fi
+    if ! grep -rq 'torch\._check_is_size' "$bnb_dir" 2>/dev/null; then
+        return 0  # already patched
+    fi
+    info "Patching torch._check_is_size → torch._check in bitsandbytes …"
+    python3 -c "
+import glob, re
+for path in glob.glob('$bnb_dir/**/ops.py', recursive=True):
+    with open(path) as fh:
+        content = fh.read()
+    new = re.sub(r'([ \t]*)torch\._check_is_size\(blocksize\)', r'\1torch._check(blocksize >= 0)', content)
+    if new != content:
+        with open(path, 'w') as fh:
+            fh.write(new)
+"
+    info "bitsandbytes patched."
+}
+patch_bitsandbytes
+
 # ── Virtual environment ────────────────────────────────────────
 if [ ! -d ".venv" ]; then
     info "Creating virtual environment …"
