@@ -1,0 +1,4 @@
+llmcompressor>=0.12.0
+datasets>=2.0.0
+pyyaml
+# llmcompressor pins transformers<=5.10.1; install separately for inference
