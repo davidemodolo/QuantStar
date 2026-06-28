@@ -142,6 +142,7 @@ class InferenceEngine:
         if tools:
             kwargs["tools"] = tools
         kwargs["enable_thinking"] = enable_thinking
+        kwargs["preserve_thinking"] = True
         text = self.tokenizer.apply_chat_template(_safe_messages(messages), tokenize=False, **kwargs)
         inputs = self.tokenizer(text, return_tensors="pt")
         return inputs["input_ids"].to(self.model.device)
@@ -195,7 +196,11 @@ class InferenceEngine:
         )
         kwargs["streamer"] = streamer
 
-        thread = Thread(target=self.model.generate, kwargs={**kwargs, "inputs": generate_input})
+        output_ids = {}
+        def _generate():
+            output_ids["data"] = self.model.generate(**{**kwargs, "inputs": generate_input})
+
+        thread = Thread(target=_generate)
         thread.start()
 
         for text in streamer:
@@ -205,6 +210,7 @@ class InferenceEngine:
 
         if "past_key_values" in kwargs:
             self._session_kv = kwargs["past_key_values"]
+        self._session_prompt_ids = output_ids["data"]
 
     def reset_session(self) -> None:
         self._session_kv = None
