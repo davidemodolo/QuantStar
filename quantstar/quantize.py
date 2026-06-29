@@ -11,6 +11,36 @@ import torch.nn.functional as F
 
 from transformers.cache_utils import Cache, CacheLayerMixin, LinearAttentionLayer
 
+
+# ---------------------------------------------------------------------------
+# Triton autotuner race fix
+# ---------------------------------------------------------------------------
+# FLA kernels decorated with fla_cache_autotune (CachedAutotuner) can hit a
+# triton race where Autotuner._bench reads self.nargs and finds None — even
+# during a single-threaded call. The warmup cannot cover every sequence-length
+# shape, so disable autotuning at runtime: when self.nargs is unexpectedly
+# None, fall back to {} (empty positional args) and let the benchmark run.
+# This is safe because FLA kernels pass all arguments as kwargs.
+
+def _patch_triton_autotuner():
+    from triton.runtime.autotuner import Autotuner
+
+    if getattr(Autotuner, "_quantstar_nargs_fixed", False):
+        return
+
+    _original_bench = Autotuner._bench
+
+    def _safe_bench(self, *args, config, **meta):
+        if self.nargs is None:
+            self.nargs = {}
+        return _original_bench(self, *args, config=config, **meta)
+
+    Autotuner._bench = _safe_bench
+    Autotuner._quantstar_nargs_fixed = True
+
+
+_patch_triton_autotuner()
+
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")  # avoids OOM from allocator fragmentation with large cache blocks
 
 log = logging.getLogger(__name__)
@@ -556,7 +586,7 @@ def load_and_quantize_model(
     model_path: str,
     attn_implementation: str = "sdpa",
     torch_dtype_str: str = "bfloat16",
-) -> tuple[torch.nn.Module, object, Optional[object]]:
+) -> tuple[torch.nn.Module, object, object, Optional[object]]:
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
     dtype = getattr(torch, torch_dtype_str) if torch_dtype_str != "auto" else torch.bfloat16
@@ -570,10 +600,9 @@ def load_and_quantize_model(
         bnb_4bit_quant_type="nf4",
     )
 
-    # Load with sdpa (validated), then switch to our custom "quantstar" attention.
-    # "quantstar" is registered in ALL_ATTENTION_FUNCTIONS but NOT in the mask
-    # registry, so create_causal_mask auto-skips (returns None) -> no 4D mask
-    # materialized, and our attention handles causality + GQA itself.
+    # AutoModelForCausalLM resolves to Qwen3_5ForConditionalGeneration for Qwen3.6,
+    # loading the full VL model (language + vision encoder). Load with sdpa then
+    # switch to our custom "quantstar" attention.
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
         quantization_config=bnb_config,
@@ -594,7 +623,10 @@ def load_and_quantize_model(
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
+    from transformers.models.qwen3_vl import Qwen3VLProcessor
+    processor = Qwen3VLProcessor.from_pretrained(model_path)
+
     cache_factory = _make_cache_factory(model)
 
     model.eval()
-    return model, tokenizer, cache_factory
+    return model, tokenizer, processor, cache_factory

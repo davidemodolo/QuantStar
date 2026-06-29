@@ -28,10 +28,18 @@ def _is_small_task(messages: list[dict], max_tokens: Optional[int]) -> bool:
     """
     if not messages:
         return False
-    combined = " ".join(
-        m.get("content", "") if isinstance(m.get("content"), str) else ""
-        for m in messages
-    ).lower()
+
+    def _extract_text(content) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return " ".join(
+                p.get("text", "") if isinstance(p, dict) and p.get("type") == "text" else ""
+                for p in content
+            )
+        return ""
+
+    combined = " ".join(_extract_text(m.get("content", "")) for m in messages).lower()
     # OpenCode title generation typically contains these patterns
     title_markers = [
         "generate a short title",
