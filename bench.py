@@ -46,7 +46,7 @@ def bench_context(
     tokenizer = engine.tokenizer
 
     msgs = _build_prompt(tokenizer, target_tokens)
-    input_ids = engine._tokenize(msgs, enable_thinking=False)
+    input_ids, _, _, _ = engine._tokenize(msgs, enable_thinking=False)
     actual = input_ids.shape[1]
 
     engine.reset_session()
@@ -100,7 +100,7 @@ def main():
 
     print("\n[1/2] Loading model …")
     model_path = download_model(config.model.repo, config.model.cache_dir)
-    model, tokenizer, cache_config = load_and_quantize_model(
+    model, tokenizer, processor, cache_config = load_and_quantize_model(
         model_path=model_path,
         attn_implementation=config.model.attn_implementation,
         torch_dtype_str=config.model.torch_dtype,
@@ -109,6 +109,7 @@ def main():
     engine = InferenceEngine(
         model=model,
         tokenizer=tokenizer,
+        processor=processor,
         cache_config=cache_config,
         max_context=config.inference.max_context,
         max_new_tokens=config.inference.max_new_tokens,

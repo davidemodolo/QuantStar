@@ -21,23 +21,33 @@ def _opencode_config_path() -> str:
 
 
 def _warmup_engine(engine) -> None:
-    """Run a dummy generation to autotune all triton kernels before serving.
+    """Run dummy generations to autotune triton kernels before serving.
 
-    The first triton kernel invocation triggers autotuning (benchmark loop),
-    which sets/clears self.nargs on the shared autotuner object. Concurrent
-    requests during autotuning cause a race where one thread resets nargs
-    to None while another thread's _bench is still reading it. Pre-warming
-    populates the in-memory kernel cache so subsequent calls skip autotuning.
+    Pre-warming the chunked-prefill path at common sequence lengths populates
+    the triton kernel cache so subsequent requests skip autotuning (avoiding
+    first-request latency). The full-prefill path (used by vision requests)
+    is protected by the autotuner monkey-patch in quantize.py and does not
+    need explicit warmup.
     """
+    import torch as _torch
+
     log = logging.getLogger(__name__)
     log.info("Warming up model (autotuning triton kernels) …")
 
-    warmup_messages = [{"role": "user", "content": "1+1="}]
-    try:
-        text, _, _ = engine.chat_completion_sync(warmup_messages, max_tokens=8, enable_thinking=False)
-        log.info("Warmup complete: %r", text[:120])
-    except Exception as exc:
-        log.warning("Warmup failed (non-fatal): %s", exc)
+    for n_tokens in [128, 1024]:
+        filler = "test " * max(1, n_tokens // 2)
+        messages = [{"role": "user", "content": filler}]
+        try:
+            engine.reset_session()
+            _torch.cuda.synchronize()
+            text, _, _ = engine.chat_completion_sync(messages, max_tokens=1, enable_thinking=False)
+            log.info("Warmup %d tokens: %r", n_tokens, text[:60])
+        except Exception as exc:
+            log.warning("Warmup %d tokens failed (non-fatal): %s", exc)
+
+    engine.reset_session()
+    _torch.cuda.synchronize()
+    log.info("Warmup complete")
 
 
 def _init_opencode(config) -> None:
@@ -67,6 +77,10 @@ def _init_opencode(config) -> None:
                 "name": "Qwen3.6 27B 4-bit (local)",
                 "reasoning": True,
                 "tools": True,
+                "modalities": {
+                    "input": ["text", "image"],
+                    "output": ["text"],
+                },
                 "limit": {
                     "context": config.inference.max_context,
                     "output": config.inference.max_new_tokens,
@@ -74,6 +88,14 @@ def _init_opencode(config) -> None:
             }
         },
     }
+
+    # Patch any existing provider model entries that lack modalities
+    for provider_name, provider_cfg in cfg.get("provider", {}).items():
+        if not isinstance(provider_cfg, dict):
+            continue
+        for model_id, model_cfg in provider_cfg.get("models", {}).items():
+            if isinstance(model_cfg, dict) and "modalities" not in model_cfg:
+                model_cfg["modalities"] = {"input": ["text", "image"], "output": ["text"]}
 
     cfg.setdefault("agent", {})
     cfg["agent"]["quantstar"] = {
@@ -119,6 +141,8 @@ def main():
         format="%(levelname)s %(asctime)s %(name)s — %(message)s",
     )
     # Suppress known-harmless upstream warnings
+    import warnings
+    warnings.filterwarnings("ignore", message=".*tl.make_block_ptr is deprecated.*")
     logging.getLogger("transformers.models.qwen3_5.modeling_qwen3_5").setLevel(logging.ERROR)
     logging.getLogger("torch.utils._pytree").setLevel(logging.ERROR)
 
@@ -145,7 +169,7 @@ def main():
         model_path = download_model(config.model.repo, config.model.cache_dir)
 
         from .quantize import load_and_quantize_model
-        model, tokenizer, cache_config = load_and_quantize_model(
+        model, tokenizer, processor, cache_config = load_and_quantize_model(
             model_path=model_path,
             attn_implementation=config.model.attn_implementation,
             torch_dtype_str=config.model.torch_dtype,
@@ -155,6 +179,7 @@ def main():
         engine = InferenceEngine(
             model=model,
             tokenizer=tokenizer,
+            processor=processor,
             cache_config=cache_config,
             max_context=config.inference.max_context,
             max_new_tokens=config.inference.max_new_tokens,

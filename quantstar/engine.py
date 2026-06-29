@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import base64
+import io
 import logging
 import time
 from typing import Any, Iterator, Optional
 
 import torch
+from PIL import Image
 
 log = logging.getLogger(__name__)
 
@@ -36,11 +39,42 @@ def _safe_messages(messages: list[dict]) -> list[dict]:
     return safe
 
 
+def _extract_images(messages: list[dict]) -> list[Image.Image]:
+    images: list[Image.Image] = []
+    for m in messages:
+        content = m.get("content")
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            image_url = part.get("image_url")
+            if not isinstance(image_url, dict):
+                continue
+            url = image_url.get("url", "")
+            if url.startswith("data:image/"):
+                try:
+                    b64 = url.split(",", 1)[1]
+                    img_bytes = base64.b64decode(b64)
+                    img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+                    images.append(img)
+                    log.info("_extract_images: decoded image %dx%d", img.width, img.height)
+                except Exception as exc:
+                    log.warning("_extract_images: failed to decode image data URL: %s", exc)
+            elif url.startswith("http://") or url.startswith("https://"):
+                log.warning("Remote image URLs are not yet supported: %s", url[:80])
+            else:
+                log.warning("_extract_images: unknown URL scheme: %s", url[:80])
+    log.info("_extract_images: total images found: %d", len(images))
+    return images
+
+
 class InferenceEngine:
     def __init__(
         self,
         model: torch.nn.Module,
         tokenizer: Any,
+        processor: Any = None,
         cache_config: Any = None,
         max_context: int = 262144,
         max_new_tokens: int = 65536,
@@ -51,6 +85,7 @@ class InferenceEngine:
     ):
         self.model = model
         self.tokenizer = tokenizer
+        self.processor = processor
         self.cache_factory = cache_config
         self.max_context = max_context
         self.max_new_tokens = max_new_tokens
@@ -136,16 +171,50 @@ class InferenceEngine:
         self._session_prompt_ids = input_ids
         return kwargs, input_ids
 
-    def _tokenize(self, messages: list[dict[str, str]], enable_thinking: bool = True,
-                   tools: Optional[list] = None) -> torch.Tensor:
+    def _tokenize(self, messages: list[dict[str, str]], images: Optional[list] = None,
+                   enable_thinking: bool = True, tools: Optional[list] = None) -> tuple:
         kwargs = {"add_generation_prompt": True}
         if tools:
             kwargs["tools"] = tools
         kwargs["enable_thinking"] = enable_thinking
         kwargs["preserve_thinking"] = True
         text = self.tokenizer.apply_chat_template(_safe_messages(messages), tokenize=False, **kwargs)
-        inputs = self.tokenizer(text, return_tensors="pt")
-        return inputs["input_ids"].to(self.model.device)
+
+        if images and self.processor is not None:
+            t_proc = time.perf_counter()
+            image_sizes = [(img.width, img.height) for img in images]
+            log.info("_tokenize: processing %d image(s) sizes=%s", len(images), image_sizes)
+            inputs = self.processor(text=[text], images=images, return_tensors="pt", padding=True)
+            d = inputs.data if hasattr(inputs, "data") else inputs
+            input_ids = d["input_ids"].to(self.model.device)
+            pixel_values = d.get("pixel_values")
+            image_grid_thw = d.get("image_grid_thw")
+            mm_token_type_ids = d.get("mm_token_type_ids")
+            if pixel_values is not None:
+                pixel_values = pixel_values.to(self.model.device)
+            if image_grid_thw is not None:
+                image_grid_thw = image_grid_thw.to(self.model.device)
+            if mm_token_type_ids is not None:
+                mm_token_type_ids = mm_token_type_ids.to(self.model.device)
+            n_image_tokens = int((input_ids == self.model.config.image_token_id).sum()) if self.model.config.image_token_id else 0
+            dt = time.perf_counter() - t_proc
+            if torch.cuda.is_available():
+                vram = torch.cuda.memory_allocated() / (1024**3)
+                log.info("_tokenize: processor+move took %.2fs, input_ids=%s, pixel_values=%s, grid_thw=%s, image_tokens=%d, VRAM=%.1f GB",
+                         dt, input_ids.shape,
+                         pixel_values.shape if pixel_values is not None else None,
+                         image_grid_thw.shape if image_grid_thw is not None else None,
+                         n_image_tokens, vram)
+            else:
+                log.info("_tokenize: processor+move took %.2fs, input_ids=%s, pixel_values=%s, grid_thw=%s, image_tokens=%d",
+                         dt, input_ids.shape,
+                         pixel_values.shape if pixel_values is not None else None,
+                         image_grid_thw.shape if image_grid_thw is not None else None,
+                         n_image_tokens)
+            return input_ids, pixel_values, image_grid_thw, mm_token_type_ids
+        else:
+            inputs = self.tokenizer(text, return_tensors="pt")
+            return inputs["input_ids"].to(self.model.device), None, None, None
 
     def chat_completion_sync(
         self,
@@ -154,7 +223,48 @@ class InferenceEngine:
         enable_thinking: bool = True,
         tools: Optional[list] = None,
     ) -> tuple[str, int, int]:
-        input_ids = self._tokenize(messages, enable_thinking=enable_thinking, tools=tools)
+        images = _extract_images(messages)
+        input_ids, pixel_values, image_grid_thw, mm_token_type_ids = self._tokenize(
+            messages, images=images, enable_thinking=enable_thinking, tools=tools,
+        )
+
+        if images:
+            self._session_kv = None
+            self._session_prompt_ids = None
+            generate_kwargs = {
+                "max_new_tokens": max_tokens if max_tokens is not None else self.max_new_tokens,
+                "temperature": self.temperature,
+                "top_p": self.top_p,
+                "top_k": self.top_k,
+                "do_sample": self.temperature > 0,
+                "pad_token_id": self.tokenizer.pad_token_id or self.tokenizer.eos_token_id,
+                "eos_token_id": self.tokenizer.eos_token_id,
+                "pixel_values": pixel_values,
+                "image_grid_thw": image_grid_thw,
+                "mm_token_type_ids": mm_token_type_ids,
+            }
+
+            if torch.cuda.is_available():
+                vram_before = torch.cuda.memory_allocated() / (1024**3)
+                log.info("Vision prefill starting: %d total tokens, VRAM=%.1f GB", input_ids.shape[1], vram_before)
+
+            t0 = time.perf_counter()
+            with torch.no_grad():
+                outputs = self.model.generate(input_ids, **generate_kwargs)
+            elapsed = time.perf_counter() - t0
+
+            if torch.cuda.is_available():
+                vram_after = torch.cuda.memory_allocated() / (1024**3)
+                peak = torch.cuda.max_memory_allocated() / (1024**3)
+
+            n_input = input_ids.shape[1]
+            generated_ids = outputs[0][n_input:]
+            text = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
+            n_tokens = len(generated_ids)
+            log.info("Vision: %d tokens in %.2fs (%.1f tok/s), VRAM before=%.1f after=%.1f peak=%.1f GB",
+                     n_tokens, elapsed, n_tokens / elapsed, vram_before, vram_after, peak)
+            return text, n_input, n_tokens
+
         kwargs, generate_input = self._prepare_generation(input_ids, max_tokens)
 
         t0 = time.perf_counter()
@@ -185,8 +295,50 @@ class InferenceEngine:
 
         from transformers import TextIteratorStreamer
 
-        input_ids = self._tokenize(messages, enable_thinking=enable_thinking, tools=tools)
+        images = _extract_images(messages)
+        input_ids, pixel_values, image_grid_thw, mm_token_type_ids = self._tokenize(
+            messages, images=images, enable_thinking=enable_thinking, tools=tools,
+        )
         self._last_prompt_tokens = input_ids.shape[1]
+
+        if images:
+            self._session_kv = None
+            self._session_prompt_ids = None
+            generate_kwargs = {
+                "max_new_tokens": max_tokens if max_tokens is not None else self.max_new_tokens,
+                "temperature": self.temperature,
+                "top_p": self.top_p,
+                "top_k": self.top_k,
+                "do_sample": self.temperature > 0,
+                "pad_token_id": self.tokenizer.pad_token_id or self.tokenizer.eos_token_id,
+                "eos_token_id": self.tokenizer.eos_token_id,
+                "pixel_values": pixel_values,
+                "image_grid_thw": image_grid_thw,
+                "mm_token_type_ids": mm_token_type_ids,
+            }
+
+            if torch.cuda.is_available():
+                vram_before = torch.cuda.memory_allocated() / (1024**3)
+                log.info("Vision prefill starting (stream): %d total tokens, VRAM=%.1f GB", input_ids.shape[1], vram_before)
+
+            streamer = TextIteratorStreamer(
+                self.tokenizer,
+                skip_prompt=True,
+                skip_special_tokens=True,
+            )
+            generate_kwargs["streamer"] = streamer
+
+            thread = Thread(target=self.model.generate, kwargs={"inputs": input_ids, **generate_kwargs})
+            thread.start()
+            yield from streamer
+            thread.join()
+
+            if torch.cuda.is_available():
+                vram_after = torch.cuda.memory_allocated() / (1024**3)
+                peak = torch.cuda.max_memory_allocated() / (1024**3)
+                log.info("Vision stream done: VRAM before=%.1f after=%.1f peak=%.1f GB", vram_before, vram_after, peak)
+            return
+
         kwargs, generate_input = self._prepare_generation(input_ids, max_tokens)
 
         streamer = TextIteratorStreamer(
