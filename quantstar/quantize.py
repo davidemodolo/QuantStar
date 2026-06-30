@@ -159,6 +159,15 @@ class Int4AttentionCacheLayer(CacheLayerMixin):
         self._head_dim = key_states.shape[-1]
         self.is_initialized = True
 
+    def pre_init(self, n_kv_heads: int, head_dim: int,
+                 dtype: torch.dtype = torch.bfloat16,
+                 device: torch.device = None):
+        self._n_kv_heads = n_kv_heads
+        self._head_dim = head_dim
+        self.dtype = dtype
+        self.device = device or torch.device("cuda:0")
+        self.is_initialized = True
+
     def lazy_initialization(self, key_states: torch.Tensor, value_states: torch.Tensor) -> None:
         self._lazy_init(key_states, value_states)
 
@@ -308,16 +317,23 @@ class QuantStarKVCache(Cache):
     16 full_attention layers use Int4AttentionCacheLayer (4-bit append-only KV cache).
     """
 
-    def __init__(self, config, group_size: int = _GROUP_SIZE):
+    def __init__(self, config, group_size: int = _GROUP_SIZE,
+                 dtype: torch.dtype = torch.bfloat16,
+                 device: torch.device = None):
         text_config = config.get_text_config(decoder=True)
         layer_types = getattr(text_config, "layer_types", None)
+        n_kv_heads = getattr(text_config, "num_key_value_heads", None)
+        head_dim = getattr(text_config, "head_dim", None)
 
         layers = []
         for lt in (layer_types or []):
             if lt in ("linear_attention", "conv", "mamba", "moe", "hybrid"):
                 layers.append(LinearAttentionLayer(config=None))
             else:
-                layers.append(Int4AttentionCacheLayer(group_size=group_size))
+                layer = Int4AttentionCacheLayer(group_size=group_size)
+                if n_kv_heads is not None and head_dim is not None:
+                    layer.pre_init(n_kv_heads, head_dim, dtype=dtype, device=device)
+                layers.append(layer)
 
         super().__init__(layers=layers)
 
@@ -570,9 +586,11 @@ def _make_cache_factory(model):
 
     try:
         config = model.config
+        _dtype = model.dtype if hasattr(model, "dtype") else torch.bfloat16
+        _device = model.device if hasattr(model, "device") else torch.device("cuda:0")
 
         def factory():
-            return QuantStarKVCache(config=config)
+            return QuantStarKVCache(config=config, dtype=_dtype, device=_device)
 
         _CacheFactory = factory
         log.info("QuantStar int4 KV cache factory ready (append-only, no re-quantization)")
