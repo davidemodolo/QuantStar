@@ -180,16 +180,16 @@ Weights: ~16.5 GB (NF4). KV cache: ~4.3 GB at 256k (int4, append-only). Headroom
 
 ### Qwen3.5-9B (8 GB VRAM, RTX 4060 Ti)
 
-| Context | Peak VRAM | Prefill | Decode |
-|---------|-----------|---------|--------|
-| 3k | 6.4 GB | 1.3s | 23.2 tok/s |
-| 16k | 6.5 GB | 8.5s | 14.5 tok/s |
-| 32k | 6.6 GB | 21.4s | 9.5 tok/s |
-| 64k | 6.9 GB | 58.0s | 6.0 tok/s |
-| 128k | 7.4 GB | 178.1s | 3.4 tok/s |
-| 256k | 8.4 GB | 614.4s | 1.6 tok/s |
+| Target | Actual | Prefill | Decode | Peak VRAM |
+|--------|--------|---------|--------|-----------|
+| 3,000 | 2,986 | 1.4s | 19.5t/s | 5.6 GB |
+| 16,000 | 15,986 | 8.9s | 12.4t/s | 5.7 GB |
+| 32,000 | 31,986 | 22.5s | 8.6t/s | 5.8 GB |
+| 64,000 | 63,986 | 61.9s | 5.3t/s | 6.1 GB |
+| 128,000 | 127,986 | 185.9s | 3.0t/s | 6.6 GB |
+| 256,000 | 255,986 | 661.9s | 1.3t/s | 7.6 GB |
 
-Weights: ~4.9 GB (NF4 + embedding quantization). KV cache: ~2.1 GB at 256k. Note: 256k context exceeds the 8GB VRAM budget (128k target); included for completeness.
+Weights: ~5.5 GB (NF4 + embedding quantization). KV cache: ~2.0 GB at 256k. 256k fits within 8 GB VRAM.
 
 Decode speed drops with context length because blockwise attention iterates over all cached blocks per token, dequantizing each block on the fly. At low context it's fast; at 256k it's compute-bound by the Python dispatch overhead. Future work: Triton kernel to fuse dequant + attention in a single pass.
 
