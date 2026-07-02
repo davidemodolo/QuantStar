@@ -1,4 +1,4 @@
-"""Tests for _quantize_embeddings in quantstar.quantize."""
+"""Tests for _quantize_embeddings in sqush.quantize."""
 from __future__ import annotations
 
 import inspect
@@ -9,7 +9,7 @@ class TestQuantizeEmbeddingsCpuFirst:
 
     def test_cpu_called_before_float32_conversion(self):
         """weight.data.cpu().to(float32), not .to(float32).cpu() — avoids ~4 GB GPU peak."""
-        from quantstar import quantize
+        from sqush import quantize
 
         src = inspect.getsource(quantize._quantize_embeddings)
 

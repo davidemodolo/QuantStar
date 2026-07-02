@@ -12,9 +12,9 @@ from unittest.mock import patch
 import torch
 import torch.nn as nn
 
-# Import at module level so quantstar.quantize lands in sys.modules once,
+# Import at module level so sqush.quantize lands in sys.modules once,
 # before any patch.dict context can evict it on exit.
-from quantstar.quantize import _quantize_visual_encoder
+from sqush.quantize import _quantize_visual_encoder
 
 
 # ── helpers ────────────────────────────────────────────────────────────────

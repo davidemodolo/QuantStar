@@ -21,7 +21,7 @@ VRAM_PROFILES: dict[VramTier, dict] = {
     VramTier.LOW: {
         "model": {"repo": "techwithsergiu/Qwen3.5-9B-bnb-4bit"},
         "quantization": {"weight_bits": 4, "kv_cache_bits": 4},
-        "inference": {"max_context": 131072, "max_image_pixels": 131072, "min_image_pixels": 16384},
+        "inference": {"max_context": 262144, "max_image_pixels": 131072, "min_image_pixels": 16384},
     },
     VramTier.MEDIUM: {
         "model": {"repo": None},
@@ -74,7 +74,7 @@ class LoggingConfig:
 
 
 @dataclass
-class QuantStarConfig:
+class SqushConfig:
     model: ModelConfig = field(default_factory=ModelConfig)
     quantization: QuantizationConfig = field(default_factory=QuantizationConfig)
     inference: InferenceConfig = field(default_factory=InferenceConfig)
@@ -102,8 +102,8 @@ def classify_vram(raw_gb: int) -> VramTier:
     return VramTier.LOW
 
 
-def load_config(path: str = "config.yaml", vram_gb: int | None = None) -> QuantStarConfig:
-    cfg = QuantStarConfig()
+def load_config(path: str = "config.yaml", vram_gb: int | None = None) -> SqushConfig:
+    cfg = SqushConfig()
 
     if vram_gb is None:
         vram_gb = detect_vram()
@@ -144,21 +144,21 @@ def load_config(path: str = "config.yaml", vram_gb: int | None = None) -> QuantS
                     setattr(cfg.logging, k, v)
 
     for key, value in os.environ.items():
-        if key == "QUANTSTAR_MODEL_REPO":
+        if key == "SQUSH_MODEL_REPO":
             cfg.model.repo = value
-        elif key == "QUANTSTAR_MODEL_CACHE":
+        elif key == "SQUSH_MODEL_CACHE":
             cfg.model.cache_dir = value
-        elif key == "QUANTSTAR_WEIGHT_BITS":
+        elif key == "SQUSH_WEIGHT_BITS":
             cfg.quantization.weight_bits = int(value)
-        elif key == "QUANTSTAR_KV_BITS":
+        elif key == "SQUSH_KV_BITS":
             cfg.quantization.kv_cache_bits = int(value)
-        elif key == "QUANTSTAR_MAX_CONTEXT":
+        elif key == "SQUSH_MAX_CONTEXT":
             cfg.inference.max_context = int(value)
-        elif key == "QUANTSTAR_HOST":
+        elif key == "SQUSH_HOST":
             cfg.server.host = value
-        elif key == "QUANTSTAR_PORT":
+        elif key == "SQUSH_PORT":
             cfg.server.port = int(value)
-        elif key == "QUANTSTAR_LOG_LEVEL":
+        elif key == "SQUSH_LOG_LEVEL":
             cfg.logging.level = value
 
     return cfg

@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
 
-from .config import QuantStarConfig
+from .config import SqushConfig
 from .engine import InferenceEngine
 
 log = logging.getLogger(__name__)
@@ -51,8 +51,8 @@ def _is_small_task(messages: list[dict], max_tokens: Optional[int]) -> bool:
     return False
 
 
-def create_app(engine: InferenceEngine, config: QuantStarConfig) -> FastAPI:
-    app = FastAPI(title="QuantStar", version="2.0.0")
+def create_app(engine: InferenceEngine, config: SqushConfig) -> FastAPI:
+    app = FastAPI(title="Sqush", version="2.0.0")
 
     app.add_middleware(
         CORSMiddleware,
@@ -79,7 +79,7 @@ def create_app(engine: InferenceEngine, config: QuantStarConfig) -> FastAPI:
                     "id": config.model.repo,
                     "object": "model",
                     "created": int(time.time()),
-                    "owned_by": "quantstar",
+                    "owned_by": "sqush",
                     "context_window": engine.max_context,
                     "max_output_tokens": engine.max_new_tokens,
                 }
@@ -94,7 +94,7 @@ def create_app(engine: InferenceEngine, config: QuantStarConfig) -> FastAPI:
             "id": config.model.repo,
             "object": "model",
             "created": int(time.time()),
-            "owned_by": "quantstar",
+            "owned_by": "sqush",
             "context_window": engine.max_context,
             "max_output_tokens": engine.max_new_tokens,
         }
@@ -124,7 +124,7 @@ def create_app(engine: InferenceEngine, config: QuantStarConfig) -> FastAPI:
 
 
 async def _stream_response(messages, max_tokens, enable_thinking, tools,
-                           engine: InferenceEngine, config: QuantStarConfig,
+                           engine: InferenceEngine, config: SqushConfig,
                            temperature=None, top_p=None):
     import asyncio
 
@@ -366,7 +366,7 @@ def _delta_chunk(request_id, created, model, content=None, reasoning_content=Non
 
 
 def _sync_response(messages, max_tokens, enable_thinking, tools,
-                   engine: InferenceEngine, config: QuantStarConfig,
+                   engine: InferenceEngine, config: SqushConfig,
                    temperature=None, top_p=None):
     raw_text, prompt_tokens, completion_tokens = engine.chat_completion_sync(
         messages, max_tokens, enable_thinking=enable_thinking, tools=tools,

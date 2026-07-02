@@ -17,7 +17,7 @@ import torch
 
 class TestModelIsPreQuantized:
     def test_detects_bitsandbytes_quant_method(self):
-        from quantstar.quantize import _model_is_pre_quantized
+        from sqush.quantize import _model_is_pre_quantized
         with tempfile.TemporaryDirectory() as d:
             cfg = {"quantization_config": {"quant_method": "bitsandbytes"}}
             with open(os.path.join(d, "config.json"), "w") as f:
@@ -25,14 +25,14 @@ class TestModelIsPreQuantized:
             assert _model_is_pre_quantized(d) is True
 
     def test_returns_false_for_unquantized_model(self):
-        from quantstar.quantize import _model_is_pre_quantized
+        from sqush.quantize import _model_is_pre_quantized
         with tempfile.TemporaryDirectory() as d:
             with open(os.path.join(d, "config.json"), "w") as f:
                 json.dump({"model_type": "qwen3"}, f)
             assert _model_is_pre_quantized(d) is False
 
     def test_returns_false_for_different_quant_method(self):
-        from quantstar.quantize import _model_is_pre_quantized
+        from sqush.quantize import _model_is_pre_quantized
         with tempfile.TemporaryDirectory() as d:
             cfg = {"quantization_config": {"quant_method": "gptq"}}
             with open(os.path.join(d, "config.json"), "w") as f:
@@ -40,11 +40,11 @@ class TestModelIsPreQuantized:
             assert _model_is_pre_quantized(d) is False
 
     def test_returns_false_for_nonexistent_path(self):
-        from quantstar.quantize import _model_is_pre_quantized
+        from sqush.quantize import _model_is_pre_quantized
         assert _model_is_pre_quantized("/nonexistent/path/12345") is False
 
     def test_returns_false_for_malformed_json(self):
-        from quantstar.quantize import _model_is_pre_quantized
+        from sqush.quantize import _model_is_pre_quantized
         with tempfile.TemporaryDirectory() as d:
             with open(os.path.join(d, "config.json"), "w") as f:
                 f.write("not json {{{")
@@ -55,7 +55,7 @@ class TestModelIsPreQuantized:
 
 def _make_quantized_embedding(num_emb: int, emb_dim: int, seed: int = 0):
     """Quantize a random nn.Embedding and return (QuantizedEmbedding, original_weight)."""
-    from quantstar.quantize import QuantizedEmbedding, _EMBED_GROUP_SIZE
+    from sqush.quantize import QuantizedEmbedding, _EMBED_GROUP_SIZE
 
     torch.manual_seed(seed)
     w = torch.randn(num_emb, emb_dim)
@@ -154,19 +154,19 @@ class _NestedModel(torch.nn.Module):
 
 class TestQuantizeEmbeddings:
     def test_replaces_embedding_with_quantized(self):
-        from quantstar.quantize import _quantize_embeddings, QuantizedEmbedding
+        from sqush.quantize import _quantize_embeddings, QuantizedEmbedding
         model = _TinyModel()
         _quantize_embeddings(model)
         assert isinstance(model.embedding, QuantizedEmbedding)
 
     def test_linear_not_replaced(self):
-        from quantstar.quantize import _quantize_embeddings
+        from sqush.quantize import _quantize_embeddings
         model = _TinyModel()
         _quantize_embeddings(model)
         assert isinstance(model.linear, torch.nn.Linear)
 
     def test_nested_embeddings_all_replaced(self):
-        from quantstar.quantize import _quantize_embeddings, QuantizedEmbedding
+        from sqush.quantize import _quantize_embeddings, QuantizedEmbedding
         model = _NestedModel()
         _quantize_embeddings(model)
         assert isinstance(model.sub.embedding, QuantizedEmbedding)
@@ -174,7 +174,7 @@ class TestQuantizeEmbeddings:
 
     def test_old_gpu_weight_freed(self):
         """After replacement the original Embedding weight tensor is freed (empty)."""
-        from quantstar.quantize import _quantize_embeddings
+        from sqush.quantize import _quantize_embeddings
         model = _TinyModel()
         orig_emb = model.embedding
         _quantize_embeddings(model)
@@ -182,7 +182,7 @@ class TestQuantizeEmbeddings:
 
     def test_forward_still_works_after_replacement(self):
         """Model forward pass runs without error after embedding surgery."""
-        from quantstar.quantize import _quantize_embeddings
+        from sqush.quantize import _quantize_embeddings
         model = _TinyModel()
         _quantize_embeddings(model)
         indices = torch.randint(0, 200, (4,))
@@ -192,7 +192,7 @@ class TestQuantizeEmbeddings:
 
     def test_output_approximately_matches_original(self):
         """Quantized embedding forward output is close to the original float output."""
-        from quantstar.quantize import _quantize_embeddings
+        from sqush.quantize import _quantize_embeddings
 
         class _WideModel(torch.nn.Module):
             def __init__(self):

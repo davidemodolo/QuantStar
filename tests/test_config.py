@@ -24,9 +24,9 @@ class TestDefaultConfig:
     """default values used when config keys are missing."""
 
     def test_18_1_all_sections_present(self):
-        """QuantStarConfig has model, quantization, inference, server, logging."""
-        from quantstar.config import QuantStarConfig
-        cfg = QuantStarConfig()
+        """SqushConfig has model, quantization, inference, server, logging."""
+        from sqush.config import SqushConfig
+        cfg = SqushConfig()
         assert hasattr(cfg, "model")
         assert hasattr(cfg, "quantization")
         assert hasattr(cfg, "inference")
@@ -34,34 +34,34 @@ class TestDefaultConfig:
         assert hasattr(cfg, "logging")
 
     def test_default_weight_bits_is_4(self):
-        from quantstar.config import load_config
+        from sqush.config import load_config
         cfg = load_config("nonexistent_path.yaml")
         assert cfg.quantization.weight_bits == 4
 
     def test_default_kv_cache_bits_is_4(self):
-        from quantstar.config import load_config
+        from sqush.config import load_config
         cfg = load_config("nonexistent_path.yaml")
         assert cfg.quantization.kv_cache_bits == 4
 
     def test_default_host_is_loopback(self):
         """server binds to 127.0.0.1 by default, not 0.0.0.0."""
-        from quantstar.config import load_config
+        from sqush.config import load_config
         cfg = load_config("nonexistent_path.yaml")
         assert cfg.server.host == "127.0.0.1"
 
     def test_default_log_level(self):
-        from quantstar.config import load_config
+        from sqush.config import load_config
         cfg = load_config("nonexistent_path.yaml")
         assert cfg.logging.level.upper() == "INFO"
 
     def test_default_temperature(self):
-        from quantstar.config import load_config
+        from sqush.config import load_config
         cfg = load_config("nonexistent_path.yaml")
         assert 0 < cfg.inference.temperature <= 1.0
 
     def test_default_torch_dtype_bfloat16(self):
         """torch_dtype defaults to 'bfloat16'."""
-        from quantstar.config import load_config
+        from sqush.config import load_config
         cfg = load_config("nonexistent_path.yaml")
         assert cfg.model.torch_dtype == "bfloat16"
 
@@ -75,7 +75,7 @@ class TestYAMLConfig:
               repo: MyOrg/MyModel
         """)
         try:
-            from quantstar.config import load_config
+            from sqush.config import load_config
             cfg = load_config(path)
             assert cfg.model.repo == "MyOrg/MyModel"
         finally:
@@ -88,7 +88,7 @@ class TestYAMLConfig:
               top_p: 0.95
         """)
         try:
-            from quantstar.config import load_config
+            from sqush.config import load_config
             cfg = load_config(path)
             assert cfg.inference.temperature == pytest.approx(0.3)
             assert cfg.inference.top_p == pytest.approx(0.95)
@@ -102,7 +102,7 @@ class TestYAMLConfig:
               port: 8080
         """)
         try:
-            from quantstar.config import load_config
+            from sqush.config import load_config
             cfg = load_config(path)
             assert cfg.server.host == "0.0.0.0"
             assert cfg.server.port == 8080
@@ -116,7 +116,7 @@ class TestYAMLConfig:
               kv_cache_bits: 8
         """)
         try:
-            from quantstar.config import load_config
+            from sqush.config import load_config
             cfg = load_config(path)
             assert cfg.quantization.weight_bits == 8
             assert cfg.quantization.kv_cache_bits == 8
@@ -129,7 +129,7 @@ class TestYAMLConfig:
               level: DEBUG
         """)
         try:
-            from quantstar.config import load_config
+            from sqush.config import load_config
             cfg = load_config(path)
             assert cfg.logging.level.upper() == "DEBUG"
         finally:
@@ -142,7 +142,7 @@ class TestYAMLConfig:
               port: 9999
         """)
         try:
-            from quantstar.config import load_config
+            from sqush.config import load_config
             cfg = load_config(path)
             assert cfg.server.port == 9999
             assert cfg.server.host == "127.0.0.1"  # default unchanged
@@ -153,7 +153,7 @@ class TestYAMLConfig:
     def test_empty_yaml_uses_all_defaults(self):
         path = _write_yaml("")
         try:
-            from quantstar.config import load_config
+            from sqush.config import load_config
             cfg = load_config(path)
             assert cfg.quantization.weight_bits == 4
         finally:
@@ -164,31 +164,31 @@ class TestEnvVarConfig:
     """environment variable overrides."""
 
     def test_18_2_max_context_from_env(self):
-        """QUANTSTAR_MAX_CONTEXT overrides inference.max_context."""
+        """SQUSH_MAX_CONTEXT overrides inference.max_context."""
         with pytest.MonkeyPatch.context() as mp:
-            mp.setenv("QUANTSTAR_MAX_CONTEXT", "32768")
-            from quantstar.config import load_config
+            mp.setenv("SQUSH_MAX_CONTEXT", "32768")
+            from sqush.config import load_config
             cfg = load_config("nonexistent.yaml")
         assert cfg.inference.max_context == 32768
 
     def test_18_2_host_from_env(self):
         with pytest.MonkeyPatch.context() as mp:
-            mp.setenv("QUANTSTAR_HOST", "0.0.0.0")
-            from quantstar.config import load_config
+            mp.setenv("SQUSH_HOST", "0.0.0.0")
+            from sqush.config import load_config
             cfg = load_config("nonexistent.yaml")
         assert cfg.server.host == "0.0.0.0"
 
     def test_18_2_port_from_env(self):
         with pytest.MonkeyPatch.context() as mp:
-            mp.setenv("QUANTSTAR_PORT", "7777")
-            from quantstar.config import load_config
+            mp.setenv("SQUSH_PORT", "7777")
+            from sqush.config import load_config
             cfg = load_config("nonexistent.yaml")
         assert cfg.server.port == 7777
 
     def test_18_2_log_level_from_env(self):
         with pytest.MonkeyPatch.context() as mp:
-            mp.setenv("QUANTSTAR_LOG_LEVEL", "WARNING")
-            from quantstar.config import load_config
+            mp.setenv("SQUSH_LOG_LEVEL", "WARNING")
+            from sqush.config import load_config
             cfg = load_config("nonexistent.yaml")
         assert cfg.logging.level == "WARNING"
 
@@ -200,8 +200,8 @@ class TestEnvVarConfig:
         """)
         try:
             with pytest.MonkeyPatch.context() as mp:
-                mp.setenv("QUANTSTAR_PORT", "1234")
-                from quantstar.config import load_config
+                mp.setenv("SQUSH_PORT", "1234")
+                from sqush.config import load_config
                 cfg = load_config(path)
             assert cfg.server.port == 1234
         finally:
@@ -212,61 +212,61 @@ class TestVramTier:
     """VRAM tier classification and profile application."""
 
     def test_8gb_is_low(self):
-        from quantstar.config import classify_vram, VramTier
+        from sqush.config import classify_vram, VramTier
         assert classify_vram(8) == VramTier.LOW
 
     def test_16gb_is_medium(self):
-        from quantstar.config import classify_vram, VramTier
+        from sqush.config import classify_vram, VramTier
         assert classify_vram(16) == VramTier.MEDIUM
 
     def test_24gb_is_high(self):
-        from quantstar.config import classify_vram, VramTier
+        from sqush.config import classify_vram, VramTier
         assert classify_vram(24) == VramTier.HIGH
 
     def test_boundary_11gb_is_low(self):
-        from quantstar.config import classify_vram, VramTier
+        from sqush.config import classify_vram, VramTier
         assert classify_vram(11) == VramTier.LOW
 
     def test_boundary_12gb_is_medium(self):
-        from quantstar.config import classify_vram, VramTier
+        from sqush.config import classify_vram, VramTier
         assert classify_vram(12) == VramTier.MEDIUM
 
     def test_boundary_19gb_is_medium(self):
-        from quantstar.config import classify_vram, VramTier
+        from sqush.config import classify_vram, VramTier
         assert classify_vram(19) == VramTier.MEDIUM
 
     def test_boundary_20gb_is_high(self):
-        from quantstar.config import classify_vram, VramTier
+        from sqush.config import classify_vram, VramTier
         assert classify_vram(20) == VramTier.HIGH
 
     def test_vram8_picks_9b_repo(self):
         """8 GB profile selects the pre-quantized 9B model."""
-        from quantstar.config import load_config
+        from sqush.config import load_config
         cfg = load_config("nonexistent.yaml", vram_gb=8)
         assert "9B" in cfg.model.repo or "9b" in cfg.model.repo.lower()
 
-    def test_vram8_sets_128k_context(self):
-        from quantstar.config import load_config
+    def test_vram8_sets_256k_context(self):
+        from sqush.config import load_config
         cfg = load_config("nonexistent.yaml", vram_gb=8)
-        assert cfg.inference.max_context == 131072
+        assert cfg.inference.max_context == 262144
 
     def test_vram24_picks_27b_repo(self):
-        from quantstar.config import load_config
+        from sqush.config import load_config
         cfg = load_config("nonexistent.yaml", vram_gb=24)
         assert "27B" in cfg.model.repo
 
     def test_vram24_sets_256k_context(self):
-        from quantstar.config import load_config
+        from sqush.config import load_config
         cfg = load_config("nonexistent.yaml", vram_gb=24)
         assert cfg.inference.max_context == 262144
 
     def test_vram_tier_stored_on_config(self):
-        from quantstar.config import load_config, VramTier
+        from sqush.config import load_config, VramTier
         cfg = load_config("nonexistent.yaml", vram_gb=8)
         assert cfg.vram_tier == VramTier.LOW
 
     def test_vram8_sets_max_image_pixels(self):
-        from quantstar.config import load_config
+        from sqush.config import load_config
         cfg = load_config("nonexistent.yaml", vram_gb=8)
         assert cfg.inference.max_image_pixels is not None
         assert cfg.inference.max_image_pixels <= 262144
@@ -274,7 +274,7 @@ class TestVramTier:
         assert cfg.inference.min_image_pixels is not None
 
     def test_vram24_no_image_pixel_cap(self):
-        from quantstar.config import load_config
+        from sqush.config import load_config
         cfg = load_config("nonexistent.yaml", vram_gb=24)
         assert cfg.inference.max_image_pixels is None
         assert cfg.inference.min_image_pixels is None

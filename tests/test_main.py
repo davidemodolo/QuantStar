@@ -15,8 +15,8 @@ from unittest import mock
 
 
 def _make_config(host="127.0.0.1", port=9898, max_context=262144, max_new_tokens=65536):
-    from quantstar.config import QuantStarConfig
-    cfg = QuantStarConfig()
+    from sqush.config import SqushConfig
+    cfg = SqushConfig()
     cfg.server.host = host
     cfg.server.port = port
     cfg.inference.max_context = max_context
@@ -40,8 +40,8 @@ class TestInitOpencode:
             if existing_cfg is None:
                 os.unlink(tmp_path)  # simulate file not existing
 
-            from quantstar.__main__ import _init_opencode
-            with mock.patch("quantstar.__main__._opencode_config_path", return_value=tmp_path):
+            from sqush.__main__ import _init_opencode
+            with mock.patch("sqush.__main__._opencode_config_path", return_value=tmp_path):
                 _init_opencode(config)
 
             with open(tmp_path) as f:
@@ -55,13 +55,13 @@ class TestInitOpencode:
         cfg = _make_config()
         result = self._run_init(cfg, existing_cfg=None)
         assert "provider" in result
-        assert "quantstar" in result["provider"]
+        assert "sqush" in result["provider"]
 
     def test_15_1_correct_base_url(self):
         """base URL matches configured host:port."""
         cfg = _make_config(host="127.0.0.1", port=9898)
         result = self._run_init(cfg)
-        base_url = result["provider"]["quantstar"]["options"]["baseURL"]
+        base_url = result["provider"]["sqush"]["options"]["baseURL"]
         assert "127.0.0.1" in base_url
         assert "9898" in base_url
 
@@ -69,13 +69,13 @@ class TestInitOpencode:
         """apiKey is set to "local"."""
         cfg = _make_config()
         result = self._run_init(cfg)
-        assert result["provider"]["quantstar"]["options"]["apiKey"] == "local"
+        assert result["provider"]["sqush"]["options"]["apiKey"] == "local"
 
     def test_15_1_model_has_reasoning_and_tools(self):
         """model entry declares reasoning=True and tools=True."""
         cfg = _make_config()
         result = self._run_init(cfg)
-        models = result["provider"]["quantstar"]["models"]
+        models = result["provider"]["sqush"]["models"]
         assert len(models) >= 1
         model = next(iter(models.values()))
         assert model.get("reasoning") is True
@@ -85,7 +85,7 @@ class TestInitOpencode:
         """model declares text+image input and text output."""
         cfg = _make_config()
         result = self._run_init(cfg)
-        models = result["provider"]["quantstar"]["models"]
+        models = result["provider"]["sqush"]["models"]
         model = next(iter(models.values()))
         modalities = model.get("modalities", {})
         assert "text" in modalities.get("input", [])
@@ -96,7 +96,7 @@ class TestInitOpencode:
         """context limit in model entry matches inference.max_context."""
         cfg = _make_config(max_context=32768)
         result = self._run_init(cfg)
-        models = result["provider"]["quantstar"]["models"]
+        models = result["provider"]["sqush"]["models"]
         model = next(iter(models.values()))
         assert model["limit"]["context"] == 32768
 
@@ -121,12 +121,12 @@ class TestInitOpencode:
         assert openai_cfg["options"]["apiKey"] == "sk-existing"
         assert "gpt-4" in openai_cfg["models"]
 
-    def test_13_5_overwrites_quantstar_only(self):
-        """re-running init updates only the quantstar provider."""
+    def test_13_5_overwrites_sqush_only(self):
+        """re-running init updates only the sqush provider."""
         existing = {
             "provider": {
                 "anthropic": {"name": "Anthropic", "options": {"apiKey": "key"}},
-                "quantstar": {"name": "OLD", "options": {"baseURL": "http://old"}},
+                "sqush": {"name": "OLD", "options": {"baseURL": "http://old"}},
             }
         }
         cfg = _make_config(port=7777)
@@ -134,8 +134,8 @@ class TestInitOpencode:
 
         # anthropic untouched
         assert result["provider"]["anthropic"]["options"]["apiKey"] == "key"
-        # quantstar updated
-        assert "7777" in result["provider"]["quantstar"]["options"]["baseURL"]
+        # sqush updated
+        assert "7777" in result["provider"]["sqush"]["options"]["baseURL"]
 
     def test_schema_key_set(self):
         """Config file gets $schema key pointing to opencode schema."""
@@ -148,13 +148,13 @@ class TestInitOpencode:
         """_init_opencode registers the provider only, not agents."""
         cfg = _make_config()
         result = self._run_init(cfg)
-        assert "quantstar" not in result.get("agent", {})
+        assert "sqush" not in result.get("agent", {})
 
 
 class TestOpenCodeConfigPath:
     def test_path_in_xdg_config(self):
         """config path is under ~/.config/opencode/."""
-        from quantstar.__main__ import _opencode_config_path
+        from sqush.__main__ import _opencode_config_path
         path = _opencode_config_path()
         assert "opencode" in path
         assert path.endswith(".json")

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Benchmark QuantStar prefill and decode speed at various context lengths.
+"""Benchmark Sqush prefill and decode speed at various context lengths.
 
 Usage:
     python bench.py                          # default: 24GB profile, bitsandbytes
@@ -20,9 +20,9 @@ import torch
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from quantstar.config import load_config, VramTier
-from quantstar.download import download_model
-from quantstar.engine import InferenceEngine
+from sqush.config import load_config, VramTier
+from sqush.download import download_model
+from sqush.engine import InferenceEngine
 
 
 def _build_prompt(tokenizer, target_tokens: int) -> list[dict]:
@@ -83,7 +83,7 @@ def bench_context(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="QuantStar Benchmark")
+    parser = argparse.ArgumentParser(description="Sqush Benchmark")
     parser.add_argument("--vram", type=int, default=None, help="VRAM budget in GB")
     parser.add_argument("--max-context", type=int, default=None, help="Override max context length")
     args = parser.parse_args()
@@ -91,7 +91,7 @@ def main():
     config = load_config(vram_gb=args.vram)
 
     print("=" * 60)
-    print("  QuantStar Benchmark")
+    print("  Sqush Benchmark")
     if args.vram:
         print(f"  VRAM profile: {args.vram} GB")
     print("=" * 60)
@@ -99,8 +99,8 @@ def main():
     print("\n[1/2] Loading model …")
 
     from pathlib import Path
-    from quantstar.quantize import load_and_quantize_model
-    from quantstar.__main__ import _bake_model, _cooked_model_path
+    from sqush.quantize import load_and_quantize_model
+    from sqush.__main__ import _bake_model, _cooked_model_path
 
     log = logging.getLogger("bench")
 

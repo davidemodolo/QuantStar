@@ -1,4 +1,11 @@
-# QuantStar
+# Sqush
+
+> **Sqush  Qwen  Under  Small  Hardware**
+>
+> Sqush is a recursive acronym, like Wine. It squashes Qwen models onto consumer GPUs
+> — 27B into 24GB, 9B into 8GB — with 4-bit everything and full 256k context.
+>
+> Inspired by antirez's [DwarfStar4](https://github.com/antirez/dwarfstar4).
 
 **Run Qwen models quantized on a single GPU — 8 GB or 24 GB VRAM.**
 
@@ -18,21 +25,21 @@ Multimodal text + image input. Drop-in OpenAI-compatible API. Local, private, ze
 
 ## VRAM Tiers
 
-QuantStar auto-detects your GPU and picks the right model and settings:
+Sqush auto-detects your GPU and picks the right model and settings:
 
 | VRAM | Model | Download | Context | Weight Bits | KV Bits |
 |------|-------|----------|---------|-------------|---------|
-| 8 GB | Qwen3.5-9B (pre-quantized) | 8.6 GB | 128k | 4-bit NF4 | 4-bit int4 |
+| 8 GB | Qwen3.5-9B (pre-quantized) | 8.6 GB | 256k | 4-bit NF4 | 4-bit int4 |
 | 24 GB | Qwen3.6-27B | 52 GB | 256k | 4-bit NF4 | 4-bit int4 |
 
 Override auto-detection with `--vram`:
 
 ```bash
 ./run.sh --vram 8 serve      # force 8GB profile
-python -m quantstar --vram 8 serve
+python -m sqush --vram 8 serve
 ```
 
-The 8 GB tier uses [`techwithsergiu/Qwen3.5-9B-bnb-4bit`](https://huggingface.co/techwithsergiu/Qwen3.5-9B-bnb-4bit) — a pre-quantized bitsandbytes NF4 checkpoint, just 8.6 GB to download. On first run, QuantStar *bakes* it: the embedding table (`embed_tokens`, 1.93 GB in bfloat16) is quantized to 4-bit per-group asymmetric format and saved as a side-car file. The baked model is cached; subsequent starts load it directly. bitsandbytes does not quantize `nn.Embedding` layers, so QuantStar handles that itself. The `lm_head` projection (another 2.03 GB in bfloat16, kept unquantized by the upstream checkpoint) is quantized to NF4 at load time, saving a further ~1.45 GB. Together this keeps loading and inference well within the 8 GB budget, leaving headroom for long contexts.
+The 8 GB tier uses [`techwithsergiu/Qwen3.5-9B-bnb-4bit`](https://huggingface.co/techwithsergiu/Qwen3.5-9B-bnb-4bit) — a pre-quantized bitsandbytes NF4 checkpoint, just 8.6 GB to download. On first run, Sqush *bakes* it: the embedding table (`embed_tokens`, 1.93 GB in bfloat16) is quantized to 4-bit per-group asymmetric format and saved as a side-car file. The baked model is cached; subsequent starts load it directly. bitsandbytes does not quantize `nn.Embedding` layers, so Sqush handles that itself. The `lm_head` projection (another 2.03 GB in bfloat16, kept unquantized by the upstream checkpoint) is quantized to NF4 at load time, saving a further ~1.45 GB. Together this keeps loading and inference well within the 8 GB budget, leaving headroom for long contexts.
 
 Image inputs on the 8 GB tier are capped at 131,072 pixels (≈ 362 × 362) before being passed to the vision encoder. Images larger than this are downscaled to fit. This is necessary because the vision encoder's self-attention over image patches generates large bfloat16 activation tensors — at full 1024 × 1024 resolution (4096 patches) this exceeds the VRAM budget regardless of weight quantization. At the cap, the vision encoder sees 512 patches instead of 4096, keeping activation memory within budget.
 
@@ -65,21 +72,21 @@ Other commands:
 
 ## Use with OpenCode
 
-Register QuantStar as a local provider:
+Register Sqush as a local provider:
 
 ```bash
 ./run.sh init
 ```
 
-This writes the provider and agent config to `~/.config/opencode/opencode.json`. Then in OpenCode, run `/models` and select `quantstar/qwen3.6-27b`.
+This writes the provider and agent config to `~/.config/opencode/opencode.json`. Then in OpenCode, run `/models` and select `sqush/qwen3.6-27b`.
 
 Or add it manually - in your `opencode.json`:
 
 ```json
 {
   "provider": {
-    "quantstar": {
-      "name": "QuantStar (local)",
+    "sqush": {
+      "name": "Sqush (local)",
       "npm": "@ai-sdk/openai-compatible",
       "options": {
         "baseURL": "http://127.0.0.1:9898/v1",
@@ -100,9 +107,9 @@ Or add it manually - in your `opencode.json`:
     }
   },
   "agent": {
-    "quantstar": {
-      "description": "Local QuantStar - Qwen3.6 27B 4-bit",
-      "model": "quantstar/qwen3.6-27b",
+    "sqush": {
+      "description": "Local Sqush - Qwen3.6 27B 4-bit",
+      "model": "sqush/qwen3.6-27b",
       "temperature": 0
     }
   }
@@ -111,7 +118,7 @@ Or add it manually - in your `opencode.json`:
 
 ## Configuration
 
-Edit `config.yaml` (or use `QUANTSTAR_*` env vars):
+Edit `config.yaml` (or use `SQUSH_*` env vars):
 
 ```yaml
 model:
@@ -214,7 +221,7 @@ python -m pytest tests/
 
 The suite covers:
 
-- **KV cache math** — int4 quantization, packed uint8 layout, round-trip accuracy, group-boundary edge cases, `QuantStarKVCache` layer structure
+- **KV cache math** — int4 quantization, packed uint8 layout, round-trip accuracy, group-boundary edge cases, `SqushKVCache` layer structure
 - **Blockwise GQA attention** — first prefill, cached prefill with offset, decode step, causal masking, GQA grouping, numerical stability, `blockwise_attention_from_cache`
 - **Inference engine** — image extraction, message preprocessing, tokenization paths, `_prepare_generation` kwargs, session KV cache reuse (text and vision), stream and sync paths
 - **FastAPI server** — health/VRAM endpoints, models list, sync and streaming completions, SSE format, CORS, thinking/reasoning content, tool call parsing and streaming
@@ -225,7 +232,7 @@ The suite covers:
 For end-to-end smoke testing against a live server (requires a GPU and the downloaded model):
 
 ```bash
-./test_quantstar.sh
+./test_sqush.sh
 ```
 
 This starts the server, tests streaming and non-streaming requests, concurrent load, and verifies no `<think>` tags leak into content fields.

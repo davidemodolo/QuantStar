@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# QuantStar — quantized Qwen inference (8 GB and 24 GB VRAM)
+# Sqush — quantized Qwen inference (8 GB and 24 GB VRAM)
 # One-command setup and launch.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -15,20 +15,31 @@ NC='\033[0m'
 info() { echo -e "${GREEN}[INFO]${NC} $*"; }
 warn() { echo -e "${RED}[WARN]${NC} $*"; }
 
-# ── GPU check ──────────────────────────────────────────────────
+# ── GPU + CUDA version detection ───────────────────────────────
+CUDA_TAG="cpu"
+CUDA_INT=0
 if command -v nvidia-smi &>/dev/null; then
     VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -1)
     VRAM_GB=$((VRAM_MB / 1024))
     info "GPU detected: ${VRAM_GB} GB VRAM"
+    _cuda_ver=$(nvidia-smi | grep -oP "CUDA Version: \K[0-9]+\.[0-9]+" | head -1)
+    if [ -n "$_cuda_ver" ]; then
+        _major=$(echo "$_cuda_ver" | cut -d. -f1)
+        _minor=$(echo "$_cuda_ver" | cut -d. -f2)
+        CUDA_TAG="cu${_major}${_minor}"
+        CUDA_INT=$((_major * 10 + _minor))
+        info "CUDA version: ${_cuda_ver} (${CUDA_TAG})"
+    fi
 else
     warn "No NVIDIA GPU detected via nvidia-smi. CPU-only mode."
     VRAM_GB=0
 fi
 
-# ── CUDA 13 library path (needed for bitsandbytes) ─────────────
-if [ -d "$SCRIPT_DIR/.venv/lib/python3.14/site-packages/nvidia/cu13/lib" ]; then
-    export LD_LIBRARY_PATH="$SCRIPT_DIR/.venv/lib/python3.14/site-packages/nvidia/cu13/lib:${LD_LIBRARY_PATH:-}"
-fi
+# ── CUDA library path (needed for bitsandbytes) ─────────────────
+_py_site="$SCRIPT_DIR/.venv/lib/python3.14/site-packages"
+for _lib_dir in "$_py_site/nvidia/"*/lib; do
+    [ -d "$_lib_dir" ] && export LD_LIBRARY_PATH="$_lib_dir:${LD_LIBRARY_PATH:-}"
+done
 
 # Disable triton autotuner disk cache (avoids None cache key issue with FLA on py3.14)
 export FLA_CACHE_RESULTS=0
@@ -76,9 +87,9 @@ source .venv/bin/activate
 
 # ── Install dependencies ───────────────────────────────────────
 DEPS_MARKER=".venv/.deps_installed"
-if [ ! -f "$DEPS_MARKER" ]; then
-    info "Installing PyTorch and Torchvision with CUDA 12.6 (this may take a while) …"
-    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126 -q
+if [ ! -f "$DEPS_MARKER" ] || [ "$(cat "$DEPS_MARKER" 2>/dev/null)" != "$CUDA_TAG" ]; then
+    info "Installing PyTorch and Torchvision with ${CUDA_TAG} (this may take a while) …"
+    pip install torch torchvision --index-url "https://download.pytorch.org/whl/${CUDA_TAG}" -q
 
     info "Installing project and dependencies from pyproject.toml …"
     pip install -e . -q
@@ -86,8 +97,29 @@ if [ ! -f "$DEPS_MARKER" ]; then
     info "Installing quanto for KV cache quantization (optional) …"
     pip install "quanto>=0.2.0" -q 2>/dev/null || warn "quanto not available — KV cache quantization disabled"
 
-    touch "$DEPS_MARKER"
+    echo "$CUDA_TAG" > "$DEPS_MARKER"
     info "Dependencies installed."
+fi
+
+# ── Auto-select bitsandbytes binary ────────────────────────────
+# bnb ships pre-compiled binaries only up to a certain CUDA version;
+# pick the highest available one that doesn't exceed the system version.
+if [ "$CUDA_INT" -gt 0 ]; then
+    _bnb_dir="$_py_site/bitsandbytes"
+    _best_bnb=0
+    for _so in "$_bnb_dir"/libbitsandbytes_cuda*.so; do
+        [ -f "$_so" ] || continue
+        _ver=$(basename "$_so" | grep -oP 'cuda\K[0-9]+')
+        if [ "$_ver" -le "$CUDA_INT" ] && [ "$_ver" -gt "$_best_bnb" ]; then
+            _best_bnb="$_ver"
+        fi
+    done
+    if [ "$_best_bnb" -gt 0 ]; then
+        export BNB_CUDA_VERSION="$_best_bnb"
+        if [ "$_best_bnb" -ne "$CUDA_INT" ]; then
+            info "bitsandbytes: no binary for ${CUDA_TAG}, falling back to cuda${_best_bnb}"
+        fi
+    fi
 fi
 
 # ── Parse --vram override ──────────────────────────────────────
@@ -118,26 +150,26 @@ MODE="${1:-chat}"
 case "$MODE" in
     download)
         info "Downloading model …"
-        python -m quantstar --vram "$VRAM_GB" download
+        python -m sqush --vram "$VRAM_GB" download
         ;;
     bake)
         info "Baking model (quantize visual encoder, one-time) …"
-        python -m quantstar --vram "$VRAM_GB" bake
+        python -m sqush --vram "$VRAM_GB" bake
         ;;
     serve)
         info "Starting server …"
-        python -m quantstar --vram "$VRAM_GB" serve
+        python -m sqush --vram "$VRAM_GB" serve
         ;;
     chat)
         info "Starting interactive chat …"
-        python -m quantstar --vram "$VRAM_GB" chat
+        python -m sqush --vram "$VRAM_GB" chat
         ;;
     info)
-        python -m quantstar --vram "$VRAM_GB" info
+        python -m sqush --vram "$VRAM_GB" info
         ;;
     init)
-        info "Registering QuantStar in OpenCode config …"
-        python -m quantstar --vram "$VRAM_GB" init
+        info "Registering Sqush in OpenCode config …"
+        python -m sqush --vram "$VRAM_GB" init
         ;;
     *)
         echo "Usage: ./run.sh [download|bake|serve|chat|info|init]"
@@ -147,7 +179,7 @@ case "$MODE" in
         echo "  serve     — start OpenAI-compatible API server"
         echo "  chat      — start interactive CLI chat"
         echo "  info      — show configuration"
-        echo "  init      — register QuantStar in OpenCode config"
+        echo "  init      — register Sqush in OpenCode config"
         exit 1
         ;;
 esac

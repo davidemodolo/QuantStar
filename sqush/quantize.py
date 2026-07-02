@@ -25,7 +25,7 @@ from transformers.cache_utils import Cache, CacheLayerMixin, LinearAttentionLaye
 def _patch_triton_autotuner():
     from triton.runtime.autotuner import Autotuner
 
-    if getattr(Autotuner, "_quantstar_nargs_fixed", False):
+    if getattr(Autotuner, "_sqush_nargs_fixed", False):
         return
 
     _original_bench = Autotuner._bench
@@ -36,7 +36,7 @@ def _patch_triton_autotuner():
         return _original_bench(self, *args, config=config, **meta)
 
     Autotuner._bench = _safe_bench
-    Autotuner._quantstar_nargs_fixed = True
+    Autotuner._sqush_nargs_fixed = True
 
 
 _patch_triton_autotuner()
@@ -307,7 +307,7 @@ class Int4AttentionCacheLayer(CacheLayerMixin):
         return full[:, :, off:off + n, :]
 
 
-class QuantStarKVCache(Cache):
+class SqushKVCache(Cache):
     """Hybrid KV cache for Qwen3.6's mixed architecture.
 
     48 linear_attention (DeltaNet) layers use LinearAttentionLayer (bf16 conv/recurrent state,
@@ -407,7 +407,7 @@ def blockwise_gqa_attention(query: torch.Tensor, key: torch.Tensor, value: torch
     return out.to(dtype)
 
 
-def quantstar_attention_forward(module, query, key, value, attention_mask, dropout=0.0,
+def sqush_attention_forward(module, query, key, value, attention_mask, dropout=0.0,
                                scaling=None, is_causal=None, **kwargs):
     """Custom attention: blockwise GQA for cached prefill (offset>0), SDPA otherwise.
 
@@ -492,7 +492,7 @@ def _patch_qwen_attention():
     during prefill (eliminates the full-dequant transient). Decode uses SDPA."""
     from transformers.models.qwen3_5 import modeling_qwen3_5 as M
 
-    if getattr(M.Qwen3_5Attention, "_quantstar_patched", False):
+    if getattr(M.Qwen3_5Attention, "_sqush_patched", False):
         return
 
     apply_rotary_pos_emb = M.apply_rotary_pos_emb
@@ -546,19 +546,19 @@ def _patch_qwen_attention():
         return attn_output, None
 
     M.Qwen3_5Attention.forward = forward
-    M.Qwen3_5Attention._quantstar_patched = True
+    M.Qwen3_5Attention._sqush_patched = True
 
 
 _patch_qwen_attention()
 
 
-def _register_quantstar_attention():
+def _register_sqush_attention():
     from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
-    if "quantstar" not in ALL_ATTENTION_FUNCTIONS:
-        ALL_ATTENTION_FUNCTIONS.register("quantstar", quantstar_attention_forward)
+    if "sqush" not in ALL_ATTENTION_FUNCTIONS:
+        ALL_ATTENTION_FUNCTIONS.register("sqush", sqush_attention_forward)
 
 
-_register_quantstar_attention()
+_register_sqush_attention()
 
 
 # ---------------------------------------------------------------------------
@@ -580,9 +580,9 @@ def _make_cache_factory(model):
         _device = model.device if hasattr(model, "device") else torch.device("cuda:0")
 
         def factory():
-            return QuantStarKVCache(config=config, dtype=_dtype, device=_device)
+            return SqushKVCache(config=config, dtype=_dtype, device=_device)
 
-        log.info("QuantStar int4 KV cache factory ready (append-only, no re-quantization)")
+        log.info("Sqush int4 KV cache factory ready (append-only, no re-quantization)")
         return factory
     except Exception as e:
         log.warning(f"Failed to create int4 KV cache ({e}) — using dynamic cache")
@@ -762,9 +762,9 @@ def load_and_quantize_model(
             attn_implementation=attn_implementation,
             trust_remote_code=True,
         )
-        log.info("Loaded with bitsandbytes 4-bit NF4 quantization (attn=quantstar blockwise GQA)")
+        log.info("Loaded with bitsandbytes 4-bit NF4 quantization (attn=sqush blockwise GQA)")
 
-    model.config._attn_implementation = "quantstar"
+    model.config._attn_implementation = "sqush"
 
     _print_memory_usage("after model load")
 

@@ -16,7 +16,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*httpx.
 
 from fastapi.testclient import TestClient
 
-from quantstar.config import QuantStarConfig
+from sqush.config import SqushConfig
 
 # ── fixtures ─────────────────────────────────────────────────────────────────
 
@@ -42,11 +42,11 @@ def _make_engine(
 
 
 def _make_app(sync_text="response text", stream_tokens=None):
-    from quantstar.server import create_app
+    from sqush.server import create_app
 
     engine = _make_engine(sync_text, stream_tokens)
     # Use real config so attribute access (cfg.model.repo) works normally
-    cfg = QuantStarConfig()
+    cfg = SqushConfig()
     cfg.model.repo = "test-model"
     app = create_app(engine, cfg)
     return app, engine
@@ -474,14 +474,14 @@ class TestThinkingStream:
 
     def test_8_8_small_task_disables_thinking(self):
         """_is_small_task returns True for title-generation patterns."""
-        from quantstar.server import _is_small_task
+        from sqush.server import _is_small_task
 
         msgs = [{"role": "user", "content": "generate a short title for this chat"}]
         assert _is_small_task(msgs, None) is True
 
     def test_8_9_small_task_list_content(self):
         """_is_small_task works when message content is a list."""
-        from quantstar.server import _is_small_task
+        from sqush.server import _is_small_task
 
         msgs = [
             {
@@ -495,7 +495,7 @@ class TestThinkingStream:
 
     def test_8_10_regular_message_not_small(self):
         """normal coding question is not a small task."""
-        from quantstar.server import _is_small_task
+        from sqush.server import _is_small_task
 
         msgs = [{"role": "user", "content": "Write a Python function to sort a list."}]
         assert _is_small_task(msgs, None) is False
@@ -508,7 +508,7 @@ class TestToolCallParser:
     """Tests for _make_tool_call_stream_parser"""
 
     def _parser(self, idx=0):
-        from quantstar.server import _make_tool_call_stream_parser
+        from sqush.server import _make_tool_call_stream_parser
 
         return _make_tool_call_stream_parser(tool_index=idx)
 

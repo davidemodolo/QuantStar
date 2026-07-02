@@ -10,7 +10,7 @@ from unittest import mock
 
 import torch
 
-from quantstar.quantize import (
+from sqush.quantize import (
     Int4AttentionCacheLayer,
     _GROUP_SIZE,
     blockwise_attention_from_cache,
@@ -245,7 +245,7 @@ class TestBlockwiseFromCache:
 class TestChunkedPrefill:
     def test_3_11_last_token_not_prefilled(self):
         """_chunked_prefill processes [0, N-2] only; token N-1 left for generate()."""
-        from quantstar.engine import InferenceEngine, PREFILL_CHUNK
+        from sqush.engine import InferenceEngine, PREFILL_CHUNK
         from tests.conftest import make_engine
 
         engine = make_engine()
@@ -275,7 +275,7 @@ class TestChunkedPrefill:
 
     def test_short_prompt_is_single_chunk(self):
         """Prompt < PREFILL_CHUNK processes all-but-last in one model call."""
-        from quantstar.engine import InferenceEngine, PREFILL_CHUNK
+        from sqush.engine import InferenceEngine, PREFILL_CHUNK
         from tests.conftest import make_engine
 
         engine = make_engine()
@@ -295,7 +295,7 @@ class TestChunkedPrefill:
 
     def test_long_prompt_uses_multiple_chunks(self):
         """Prompt > PREFILL_CHUNK triggers multiple model calls."""
-        from quantstar.engine import PREFILL_CHUNK
+        from sqush.engine import PREFILL_CHUNK
         from tests.conftest import make_engine
 
         engine = make_engine()

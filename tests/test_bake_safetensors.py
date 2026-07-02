@@ -1,4 +1,4 @@
-"""Tests for _bake_safetensors in quantstar.__main__."""
+"""Tests for _bake_safetensors in sqush.__main__."""
 from __future__ import annotations
 
 import json
@@ -26,7 +26,7 @@ def _run_bake(raw_tensors: dict, config_extra: dict | None = None):
     Returns (cooked_dir, log_mock).
     """
     from safetensors.torch import save_file
-    from quantstar.__main__ import _bake_safetensors
+    from sqush.__main__ import _bake_safetensors
 
     with tempfile.TemporaryDirectory() as raw_dir, \
          tempfile.TemporaryDirectory() as cooked_dir:
@@ -157,7 +157,7 @@ class TestBakeSafetensors:
 
             log = MagicMock()
             with patch("bitsandbytes.nn.Linear4bit"):
-                from quantstar.__main__ import _bake_safetensors
+                from sqush.__main__ import _bake_safetensors
                 _bake_safetensors(raw_dir, cooked_dir, log)
 
             cooked = load_file(os.path.join(cooked_dir, "model.safetensors"))

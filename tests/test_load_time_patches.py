@@ -1,4 +1,4 @@
-"""Tests for load-time patches in quantstar.quantize:
+"""Tests for load-time patches in sqush.quantize:
 
 - _patch_chat_template_preserve_thinking: the Qwen3.5-9B (8 GB tier) chat template
   unconditionally strips prior-turn <think> blocks, which breaks session KV reuse —
@@ -16,7 +16,7 @@ from unittest import mock
 
 import torch
 
-from quantstar.quantize import (
+from sqush.quantize import (
     _TEMPLATE_PRESERVE_THINKING,
     _TEMPLATE_STRIP_THINKING,
     _patch_chat_template_preserve_thinking,

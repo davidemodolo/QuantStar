@@ -31,7 +31,7 @@ def _patch_load_deps(mock_config, mock_model, *, is_pre_quantized=True):
     @contextlib.contextmanager
     def ctx():
         with (
-            patch("quantstar.quantize._model_is_pre_quantized", return_value=is_pre_quantized),
+            patch("sqush.quantize._model_is_pre_quantized", return_value=is_pre_quantized),
             patch("transformers.AutoConfig") as mock_ac,
             patch("transformers.AutoModelForImageTextToText") as mock_amt,
             patch("transformers.AutoTokenizer") as mock_at,
@@ -56,7 +56,7 @@ def _patch_load_deps(mock_config, mock_model, *, is_pre_quantized=True):
 class TestBakeDeviceMap:
     def test_dict_device_map_sets_fp32_cpu_offload(self):
         """When device_map is a dict, llm_int8_enable_fp32_cpu_offload is set True."""
-        from quantstar.quantize import load_and_quantize_model
+        from sqush.quantize import load_and_quantize_model
 
         mock_cfg = _make_mock_config(has_quant_config=True)
         mock_model = _make_mock_model()
@@ -71,7 +71,7 @@ class TestBakeDeviceMap:
 
     def test_string_device_map_does_not_set_fp32_cpu_offload(self):
         """When device_map is a string, llm_int8_enable_fp32_cpu_offload is untouched."""
-        from quantstar.quantize import load_and_quantize_model
+        from sqush.quantize import load_and_quantize_model
 
         mock_cfg = _make_mock_config(has_quant_config=True)
         mock_model = _make_mock_model()
@@ -86,7 +86,7 @@ class TestBakeDeviceMap:
 
     def test_dict_device_map_no_quant_config_does_not_raise(self):
         """If quantization_config is absent (non-pre-quantized), no AttributeError."""
-        from quantstar.quantize import load_and_quantize_model
+        from sqush.quantize import load_and_quantize_model
 
         mock_cfg = _make_mock_config(has_quant_config=False)
         mock_model = _make_mock_model()
@@ -100,7 +100,7 @@ class TestBakeDeviceMap:
 
     def test_dict_device_map_passed_to_from_pretrained(self):
         """The device_map dict is forwarded verbatim to from_pretrained."""
-        from quantstar.quantize import load_and_quantize_model
+        from sqush.quantize import load_and_quantize_model
 
         dm = {"model.visual": "cpu", "": 0}
         mock_cfg = _make_mock_config()

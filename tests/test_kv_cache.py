@@ -1,7 +1,7 @@
 """Tests for Int4 KV cache.
 
 Covers: _quantize_int4, _dequantize_int4, Int4AttentionCacheLayer,
-        QuantStarKVCache, _make_cache_factory.
+        SqushKVCache, _make_cache_factory.
 All tests run on CPU with synthetic tensors — no GPU required.
 """
 from __future__ import annotations
@@ -11,9 +11,9 @@ from unittest import mock
 import torch
 from transformers.cache_utils import LinearAttentionLayer
 
-from quantstar.quantize import (
+from sqush.quantize import (
     Int4AttentionCacheLayer,
-    QuantStarKVCache,
+    SqushKVCache,
     _GROUP_SIZE,
     _dequantize_int4,
     _make_cache_factory,
@@ -192,23 +192,23 @@ class TestInt4CacheLayer:
         assert layer.is_initialized
 
 
-# ── QuantStarKVCache ─────────────────────────────
+# ── SqushKVCache ─────────────────────────────
 
-class TestQuantStarKVCache:
+class TestSqushKVCache:
     def test_2_8_full_model_64_layers(self):
         """16 full + 48 linear = 64 total for the actual model shape."""
-        cache = QuantStarKVCache(config=_make_cache_config(n_full=16, n_linear=48))
+        cache = SqushKVCache(config=_make_cache_config(n_full=16, n_linear=48))
         assert len(cache.layers) == 64
 
     def test_2_8_int4_layer_count(self):
         """16 layers are Int4AttentionCacheLayer."""
-        cache = QuantStarKVCache(config=_make_cache_config(n_full=16, n_linear=48))
+        cache = SqushKVCache(config=_make_cache_config(n_full=16, n_linear=48))
         n_int4 = sum(1 for l in cache.layers if isinstance(l, Int4AttentionCacheLayer))
         assert n_int4 == 16
 
     def test_2_10_linear_layers_type(self):
         """linear-attention slots use LinearAttentionLayer."""
-        cache = QuantStarKVCache(config=_make_cache_config(n_full=2, n_linear=4))
+        cache = SqushKVCache(config=_make_cache_config(n_full=2, n_linear=4))
         n_lin = sum(1 for l in cache.layers if isinstance(l, LinearAttentionLayer))
         assert n_lin == 4
 
@@ -224,7 +224,7 @@ class TestQuantStarKVCache:
         cfg = mock.MagicMock()
         cfg.get_text_config.return_value = text_config
 
-        cache = QuantStarKVCache(config=cfg)
+        cache = SqushKVCache(config=cfg)
         assert isinstance(cache.layers[0], LinearAttentionLayer)
         assert isinstance(cache.layers[1], Int4AttentionCacheLayer)
         assert isinstance(cache.layers[2], LinearAttentionLayer)
@@ -264,7 +264,7 @@ class TestQuantStarKVCache:
 
     def test_pre_init_called_when_heads_known(self):
         """Int4 layers get pre_init when n_kv_heads and head_dim are available."""
-        cache = QuantStarKVCache(config=_make_cache_config(n_full=2, n_linear=0, n_kv_heads=4, head_dim=32))
+        cache = SqushKVCache(config=_make_cache_config(n_full=2, n_linear=0, n_kv_heads=4, head_dim=32))
         int4_layers = [l for l in cache.layers if isinstance(l, Int4AttentionCacheLayer)]
         for layer in int4_layers:
             assert layer.is_initialized, "pre_init should have been called during __init__"

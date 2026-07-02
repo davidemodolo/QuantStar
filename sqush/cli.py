@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from .config import QuantStarConfig
+from .config import SqushConfig
 from .engine import InferenceEngine
 
 log = logging.getLogger(__name__)
@@ -18,13 +18,13 @@ def _trim_history(messages: list[dict]) -> list[dict]:
     return system + non_system
 
 
-def run_cli(engine: InferenceEngine, config: QuantStarConfig):
+def run_cli(engine: InferenceEngine, config: SqushConfig):
     from rich.console import Console
 
     console = Console()
     messages: list[dict[str, str]] = []
 
-    console.print("[bold cyan]QuantStar[/] — [dim]Qwen3.6-27B quantized[/]")
+    console.print("[bold cyan]Sqush[/] — [dim]Qwen3.6-27B quantized[/]")
     console.print(f"  weight bits: {config.quantization.weight_bits}")
     console.print(f"  KV cache bits: {config.quantization.kv_cache_bits}")
     console.print(f"  max context: {config.inference.max_context}")

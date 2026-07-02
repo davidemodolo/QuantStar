@@ -1,5 +1,5 @@
-# QuantStar configuration
-# model.repo and inference.max_context are set by the --vram profile (8 GB → 9B/128k, 24 GB → 27B/256k).
+# Sqush configuration
+# model.repo and inference.max_context are set by the --vram profile (8 GB → 9B/256k, 24 GB → 27B/256k).
 # Override them here only if you need a custom model or context length.
 model:
   cache_dir: "./models"

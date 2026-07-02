@@ -1,11 +1,11 @@
-"""QuantStar — Qwen3.6-27B quantized inference server.
+"""Sqush — Qwen3.6-27B quantized inference server.
 
 Usage:
-    python -m quantstar download           # Download the model
-    python -m quantstar serve              # Start OpenAI-compatible server
-    python -m quantstar chat               # Interactive chat
-    python -m quantstar info               # Show config and VRAM info
-    python -m quantstar init               # Register QuantStar in OpenCode config
+    python -m sqush download           # Download the model
+    python -m sqush serve              # Start OpenAI-compatible server
+    python -m sqush chat               # Interactive chat
+    python -m sqush info               # Show config and VRAM info
+    python -m sqush init               # Register Sqush in OpenCode config
 """
 
 from __future__ import annotations
@@ -245,8 +245,8 @@ def _init_opencode(config) -> None:
     cfg.setdefault("$schema", "https://opencode.ai/config.json")
     cfg.setdefault("provider", {})
 
-    cfg["provider"]["quantstar"] = {
-        "name": "QuantStar (local)",
+    cfg["provider"]["sqush"] = {
+        "name": "Sqush (local)",
         "npm": "@ai-sdk/openai-compatible",
         "options": {
             "baseURL": f"http://{config.server.host}:{config.server.port}/v1",
@@ -274,7 +274,7 @@ def _init_opencode(config) -> None:
                     "input": ["text", "image"],
                     "output": ["text"],
                 },
-                "limit": {"context": 131072, "output": 32768},
+                "limit": {"context": 262144, "output": 32768},
             },
         },
     }
@@ -283,15 +283,15 @@ def _init_opencode(config) -> None:
         json.dump(cfg, f, indent=2)
         f.write("\n")
 
-    print(f"  Provider: quantstar")
+    print(f"  Provider: sqush")
     print(f"  Base URL: http://{config.server.host}:{config.server.port}/v1")
     print(f"  Models:   qwen3.6-27b (24GB), qwen3.5-9b (8GB)")
     print()
-    print("Run '/models' in OpenCode and select a quantstar model to use it.")
+    print("Run '/models' in OpenCode and select a sqush model to use it.")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="QuantStar — Qwen3.6-27B quantized inference")
+    parser = argparse.ArgumentParser(description="Sqush — Qwen3.6-27B quantized inference")
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("download", help="Download the model from HuggingFace")
@@ -299,7 +299,7 @@ def main():
     sub.add_parser("serve", help="Start the OpenAI-compatible server")
     sub.add_parser("chat", help="Start interactive chat")
     sub.add_parser("info", help="Show configuration")
-    sub.add_parser("init", help="Register QuantStar in OpenCode config")
+    sub.add_parser("init", help="Register Sqush in OpenCode config")
 
     parser.add_argument("--config", default="config.yaml", help="Path to config file")
     parser.add_argument("--log-level", default=None, help="Logging level")

@@ -13,7 +13,7 @@ import pytest
 import torch
 from PIL import Image
 
-from quantstar.engine import InferenceEngine, _extract_images, _safe_messages
+from sqush.engine import InferenceEngine, _extract_images, _safe_messages
 
 
 # ── helpers ────────────────────────────────────────────────────────────────
@@ -245,7 +245,7 @@ class TestChatCompletionPathSelection:
         engine.model.generate.return_value.shape = (1, 15)
         engine._tokenize = lambda *a, **kw: (mock.MagicMock(shape=(1, 10)), None, None, None)
 
-        with mock.patch("quantstar.engine._extract_images", return_value=[]):
+        with mock.patch("sqush.engine._extract_images", return_value=[]):
             engine.chat_completion_sync([{"role": "user", "content": "hi"}], max_tokens=5)
         engine._prepare_generation.assert_called_once()
 
@@ -258,7 +258,7 @@ class TestChatCompletionPathSelection:
         fake_cache = mock.MagicMock()
         engine._chunked_vision_prefill = mock.MagicMock(return_value=fake_cache)
 
-        with mock.patch("quantstar.engine._extract_images", return_value=[mock.MagicMock()]):
+        with mock.patch("sqush.engine._extract_images", return_value=[mock.MagicMock()]):
             engine.chat_completion_sync(
                 [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": _b64_image()}}]}],
                 max_tokens=5,
@@ -278,7 +278,7 @@ class TestChatCompletionPathSelection:
         engine._tokenize = lambda *a, **kw: (fake_input_ids, mock.MagicMock(), mock.MagicMock(), mock.MagicMock())
         engine._chunked_vision_prefill = mock.MagicMock(return_value=None)
 
-        with mock.patch("quantstar.engine._extract_images", return_value=[mock.MagicMock()]):
+        with mock.patch("sqush.engine._extract_images", return_value=[mock.MagicMock()]):
             engine.chat_completion_sync([{"role": "user", "content": "hi"}], max_tokens=5)
         # KV cache is now saved from model.generate output, not reset to None
         assert engine._session_kv is not None
@@ -314,7 +314,7 @@ class TestChatCompletionStreamPathSelection:
 
         with mock.patch("transformers.TextIteratorStreamer", FakeStreamer):
             with mock.patch("threading.Thread", RealThread):
-                with mock.patch("quantstar.engine._extract_images", return_value=[mock.MagicMock()]):
+                with mock.patch("sqush.engine._extract_images", return_value=[mock.MagicMock()]):
                     engine._tokenize = lambda *a, **kw: (fake_input_ids, mock.MagicMock(), mock.MagicMock(), mock.MagicMock())
                     # _chunked_vision_prefill does real model calls; short-circuit it
                     engine._chunked_vision_prefill = mock.MagicMock(return_value=None)
@@ -353,7 +353,7 @@ class TestChatCompletionStreamPathSelection:
 
         with mock.patch("transformers.TextIteratorStreamer", FakeStreamer):
             with mock.patch("threading.Thread", RealThread):
-                with mock.patch("quantstar.engine._extract_images", return_value=[]):
+                with mock.patch("sqush.engine._extract_images", return_value=[]):
                     gen = engine.chat_completion_stream([{"role": "user", "content": "hi"}], max_tokens=5)
                     result = list(gen)
                     assert result == ["hi"]
@@ -363,13 +363,13 @@ class TestChatCompletionStreamPathSelection:
 
 class TestIsSmallTask:
     def test_detects_title_generation(self):
-        from quantstar.server import _is_small_task
+        from sqush.server import _is_small_task
 
         msgs = [{"role": "user", "content": "generate a short title for this chat"}]
         assert _is_small_task(msgs, None) is True
 
     def test_detects_title_with_list_content(self):
-        from quantstar.server import _is_small_task
+        from sqush.server import _is_small_task
 
         msgs = [{
             "role": "user",
@@ -381,25 +381,25 @@ class TestIsSmallTask:
         assert _is_small_task(msgs, None) is True
 
     def test_regular_message_not_small(self):
-        from quantstar.server import _is_small_task
+        from sqush.server import _is_small_task
 
         msgs = [{"role": "user", "content": "What is the capital of France?"}]
         assert _is_small_task(msgs, None) is False
 
     def test_few_max_tokens_not_always_small(self):
-        from quantstar.server import _is_small_task
+        from sqush.server import _is_small_task
 
         msgs = [{"role": "user", "content": "Write a poem about spring"}]
         assert _is_small_task(msgs, max_tokens=5) is False
 
     def test_list_content_no_text_parts(self):
-        from quantstar.server import _is_small_task
+        from sqush.server import _is_small_task
 
         msgs = [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": _b64_image()}}]}]
         assert _is_small_task(msgs, None) is False
 
     def test_empty_messages(self):
-        from quantstar.server import _is_small_task
+        from sqush.server import _is_small_task
 
         assert _is_small_task([], None) is False
 
@@ -412,7 +412,7 @@ class TestWarmupCoverage:
     def test_warmup_covers_chunked_prefill_sizes(self):
         """The warmup covers chunked-prefill sizes. Full-prefill path is
         protected by the triton autotuner monkey-patch (tested separately)."""
-        from quantstar.__main__ import _warmup_engine
+        from sqush.__main__ import _warmup_engine
 
         import inspect
         src = inspect.getsource(_warmup_engine)
@@ -421,7 +421,7 @@ class TestWarmupCoverage:
 
     def test_warmup_engine_runs_without_gpu(self):
         """_warmup_engine should handle exceptions gracefully (e.g. no GPU)."""
-        from quantstar.__main__ import _warmup_engine
+        from sqush.__main__ import _warmup_engine
 
         engine = _make_engine()
         engine.model.return_value = mock.MagicMock()
@@ -437,7 +437,7 @@ class TestLoadAndQuantizeSignature:
         """load_and_quantize_model return annotation must declare a 4-element tuple."""
         import inspect
         import typing
-        from quantstar.quantize import load_and_quantize_model
+        from sqush.quantize import load_and_quantize_model
 
         sig = inspect.signature(load_and_quantize_model)
         annotation = sig.return_annotation
@@ -504,9 +504,9 @@ class TestTritonAutotunerPatch:
     def test_patch_applied(self):
         """Verify the triton autotuner _bench fallback is installed."""
         # The patch lives in quantize.py; importing it triggers the fix.
-        import quantstar.quantize  # noqa: F811
+        import sqush.quantize  # noqa: F811
         from triton.runtime.autotuner import Autotuner
-        assert getattr(Autotuner, "_quantstar_nargs_fixed", False), (
+        assert getattr(Autotuner, "_sqush_nargs_fixed", False), (
             "Autotuner._bench must be patched to handle self.nargs=None "
             "(triton autotuner race fix)"
         )
@@ -740,7 +740,7 @@ class TestSessionReuse:
         )
         engine._chunked_vision_prefill = mock.MagicMock(return_value=None)
 
-        with mock.patch("quantstar.engine._extract_images", return_value=[mock.MagicMock()]):
+        with mock.patch("sqush.engine._extract_images", return_value=[mock.MagicMock()]):
             engine.chat_completion_sync([{"role": "user", "content": "img"}], max_tokens=1)
 
         assert engine._session_kv is not None
@@ -755,7 +755,7 @@ class TestSessionReuse:
         )
         engine._chunked_vision_prefill = mock.MagicMock(return_value=None)
 
-        with mock.patch("quantstar.engine._extract_images", return_value=[mock.MagicMock()]):
+        with mock.patch("sqush.engine._extract_images", return_value=[mock.MagicMock()]):
             engine.chat_completion_sync([{"role": "user", "content": "img"}], max_tokens=1)
 
         assert engine._session_ids is not None
@@ -821,7 +821,7 @@ class TestSessionReuse:
 
         with mock.patch("transformers.TextIteratorStreamer", FakeStreamer):
             with mock.patch("threading.Thread", RealThread):
-                with mock.patch("quantstar.engine._extract_images", return_value=[]):
+                with mock.patch("sqush.engine._extract_images", return_value=[]):
                     list(engine.chat_completion_stream([{"role": "user", "content": "hi"}], max_tokens=5))
 
         # past_key_values from generate should be stored in _session_kv
@@ -889,13 +889,13 @@ class TestTokenizeKwargs:
             "content": "",
             "tool_calls": [{"function": {"name": "f", "arguments": '{"k": "v"}'}}],
         }]
-        from quantstar.engine import _safe_messages
+        from sqush.engine import _safe_messages
         safe = _safe_messages(msgs)
         assert safe[0]["tool_calls"][0]["function"]["arguments"] == {"k": "v"}
 
     def test_7_7_safe_messages_non_json_kept_as_string(self):
         """non-JSON argument strings are kept as strings."""
-        from quantstar.engine import _safe_messages
+        from sqush.engine import _safe_messages
         msgs = [{
             "role": "assistant",
             "content": "",
@@ -906,7 +906,7 @@ class TestTokenizeKwargs:
 
     def test_7_8_safe_messages_no_tool_calls_unchanged(self):
         """messages without tool_calls are returned unchanged."""
-        from quantstar.engine import _safe_messages
+        from sqush.engine import _safe_messages
         msgs = [{"role": "user", "content": "hello"}]
         safe = _safe_messages(msgs)
         assert safe[0]["content"] == "hello"

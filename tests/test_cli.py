@@ -6,7 +6,7 @@ Interactive-session tests (12.1-12.6) require a real terminal and are skipped.
 from __future__ import annotations
 
 
-from quantstar.cli import _MAX_HISTORY, _trim_history
+from sqush.cli import _MAX_HISTORY, _trim_history
 
 
 # ── history trimming ──────────────────────────────────────────
@@ -83,8 +83,8 @@ class TestThinkStripping:
     def _run_cli_one_turn(self, raw_response: str, user_input: str = "hi") -> str:
         """Run one CLI turn with a mocked engine and console; return printed output."""
         from unittest import mock
-        from quantstar.engine import InferenceEngine
-        from quantstar.config import QuantStarConfig
+        from sqush.engine import InferenceEngine
+        from sqush.config import SqushConfig
 
         captured = []
 
@@ -112,14 +112,14 @@ class TestThinkStripping:
         engine.chat_completion_stream.side_effect = (
             lambda *a, **kw: iter([raw_response])
         )
-        config = QuantStarConfig()
+        config = SqushConfig()
 
         console = FakeConsoleFirstTurn()
 
         # Console is imported locally inside run_cli, so patch at rich.console
         with mock.patch("rich.console.Console", return_value=console):
             try:
-                from quantstar.cli import run_cli
+                from sqush.cli import run_cli
                 run_cli(engine, config)
             except EOFError:
                 pass

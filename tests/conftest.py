@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for the QuantStar test suite.
+"""Shared pytest fixtures for the Sqush test suite.
 
 GPU-only tests use `@pytest.mark.gpu` and are skipped automatically without CUDA.
 """
@@ -70,7 +70,7 @@ def make_mock_model() -> mock.MagicMock:
 
 
 def make_engine(processor=None, cache_factory=None) -> "InferenceEngine":
-    from quantstar.engine import InferenceEngine
+    from sqush.engine import InferenceEngine
     return InferenceEngine(
         model=make_mock_model(),
         tokenizer=make_mock_tokenizer(),
@@ -96,8 +96,8 @@ def engine() -> "InferenceEngine":
 
 @pytest.fixture
 def default_config():
-    from quantstar.config import QuantStarConfig
-    return QuantStarConfig()
+    from sqush.config import SqushConfig
+    return SqushConfig()
 
 
 # ── markers ──────────────────────────────────────────────────────────────────
