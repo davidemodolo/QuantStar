@@ -44,40 +44,6 @@ done
 # Disable triton autotuner disk cache (avoids None cache key issue with FLA on py3.14)
 export FLA_CACHE_RESULTS=0
 
-# ── Patch transformers docstring warnings ───────────────────────
-patch_docstring() {
-    local f="$SCRIPT_DIR/.venv/lib/python3.14/site-packages/transformers/models/qwen3_5/modeling_qwen3_5.py"
-    if [ -f "$f" ] && grep -q "^class Qwen3_5CausalLMOutputWithPast" "$f"; then
-        if grep -q "loss (\`torch.FloatTensor\`" "$f" 2>/dev/null; then
-            return 0  # already patched
-        fi
-        info "Patching missing doc entries in Qwen3_5CausalLMOutputWithPast …"
-        python3 -c "
-f = '$f'
-with open(f) as fh:
-    content = fh.read()
-old = '''class Qwen3_5CausalLMOutputWithPast(CausalLMOutputWithPast):
-    r\\\"\\\"\\\"
-    rope_deltas'''
-new = '''class Qwen3_5CausalLMOutputWithPast(CausalLMOutputWithPast):
-    r\\\"\\\"\\\"
-    loss (\`torch.FloatTensor\` of shape \`(1,)\`, *optional*):
-        Language modeling loss (for training).
-    logits (\`torch.FloatTensor\` of shape \`(batch_size, sequence_length, config.vocab_size)\`):
-        Prediction scores of the language modeling head.
-    rope_deltas'''
-if old not in content:
-    print('SKIP: docstring format different from expected')
-else:
-    content = content.replace(old, new)
-    with open(f, 'w') as fh:
-        fh.write(content)
-    print('PATCHED')
-"
-    fi
-}
-patch_docstring
-
 # ── Virtual environment ────────────────────────────────────────
 if [ ! -d ".venv" ]; then
     info "Creating virtual environment …"
@@ -99,13 +65,48 @@ if [ ! -f "$DEPS_MARKER" ] || [ "$(cat "$DEPS_MARKER" 2>/dev/null)" != "$CUDA_TA
 
     echo "$CUDA_TAG" > "$DEPS_MARKER"
     info "Dependencies installed."
+
+    # ── Patch transformers docstring (Qwen3.5 output class) ──────
+    _qwen_file="$_py_site/transformers/models/qwen3_5/modeling_qwen3_5.py"
+    if [ -f "$_qwen_file" ]; then
+        python3 -c "
+import re
+path = '$_qwen_file'
+with open(path) as fh:
+    content = fh.read()
+# Check if already patched
+if re.search(r'loss.*\`torch\.FloatTensor\`', content):
+    print('SKIP: already patched')
+else:
+    # Insert loss + logits entries after the r\"\"\"\n of the class docstring
+    needle = r'(class Qwen3_5CausalLMOutputWithPast[^\n]*\n\s+r\"\"\"\n)'
+    match = re.search(needle, content)
+    if not match:
+        print('SKIP: cannot find Qwen3_5CausalLMOutputWithPast docstring')
+    else:
+        insert_at = match.end()
+        indent = '    '
+        new_entries = (
+            indent + 'loss (\`torch.FloatTensor\` of shape \`(1,)\`, *optional*):\n'
+            + indent + '    Language modeling loss (for training).\n'
+            + indent + 'logits (\`torch.FloatTensor\` of shape \`(batch_size, sequence_length, config.vocab_size)\`):\n'
+            + indent + '    Prediction scores of the language modeling head.\n'
+        )
+        content = content[:insert_at] + new_entries + content[insert_at:]
+        with open(path, 'w') as fh:
+            fh.write(content)
+        print('PATCHED: added loss and logits doc entries to Qwen3_5CausalLMOutputWithPast')
+"
+    fi
 fi
 
 # ── Auto-select bitsandbytes binary ────────────────────────────
-# bnb ships pre-compiled binaries only up to a certain CUDA version;
-# pick the highest available one that doesn't exceed the system version.
+# bnb ships pre-compiled binaries only up to a certain CUDA version.
+# If the exact version isn't available, symlink the closest match
+# so bitsandbytes discovers it naturally (avoids BNB_CUDA_VERSION warning).
 if [ "$CUDA_INT" -gt 0 ]; then
     _bnb_dir="$_py_site/bitsandbytes"
+    _target_so="$_bnb_dir/libbitsandbytes_cuda${CUDA_INT}.so"
     _best_bnb=0
     for _so in "$_bnb_dir"/libbitsandbytes_cuda*.so; do
         [ -f "$_so" ] || continue
@@ -114,10 +115,11 @@ if [ "$CUDA_INT" -gt 0 ]; then
             _best_bnb="$_ver"
         fi
     done
-    if [ "$_best_bnb" -gt 0 ]; then
-        export BNB_CUDA_VERSION="$_best_bnb"
+    if [ "$_best_bnb" -gt 0 ] && [ ! -f "$_target_so" ]; then
+        _best_so="$_bnb_dir/libbitsandbytes_cuda${_best_bnb}.so"
+        ln -sf "$(basename "$_best_so")" "$_target_so"
         if [ "$_best_bnb" -ne "$CUDA_INT" ]; then
-            info "bitsandbytes: no binary for ${CUDA_TAG}, falling back to cuda${_best_bnb}"
+            info "bitsandbytes: no binary for ${CUDA_TAG}, symlinked cuda${_best_bnb}"
         fi
     fi
 fi
